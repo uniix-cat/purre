@@ -363,16 +363,21 @@ void lua_bridge_init(void) {
     E.lua_state = L;
 
     /* Search for runtime/init.lua */
-    char user_runtime_path[512] = "";
+    char user_purre_path[512] = "";
+    char user_purr_path[512] = "";
     const char *home = getenv("HOME");
     if (home) {
-        snprintf(user_runtime_path, sizeof(user_runtime_path), "%s/.local/share/purr/runtime/init.lua", home);
+        snprintf(user_purre_path, sizeof(user_purre_path), "%s/.local/share/purre/runtime/init.lua", home);
+        snprintf(user_purr_path, sizeof(user_purr_path), "%s/.local/share/purr/runtime/init.lua", home);
     }
 
     const char *paths[] = {
         "runtime/init.lua",
-        user_runtime_path[0] ? user_runtime_path : NULL,
+        user_purre_path[0] ? user_purre_path : NULL,
+        user_purr_path[0] ? user_purr_path : NULL,
+        "/usr/local/share/purre/runtime/init.lua",
         "/usr/local/share/purr/runtime/init.lua",
+        "/usr/share/purre/runtime/init.lua",
         "/usr/share/purr/runtime/init.lua",
         NULL
     };

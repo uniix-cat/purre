@@ -4,11 +4,11 @@ LDFLAGS ?= $(shell pkg-config --libs luajit tree-sitter 2>/dev/null || echo "-ll
 
 SRC = $(wildcard src/*.c)
 OBJ = $(SRC:.c=.o)
-TARGET = purr
+TARGET = purre
 
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
-DATADIR = $(PREFIX)/share/purr
+DATADIR = $(PREFIX)/share/purre
 
 all: $(TARGET)
 

@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
     } else {
         buffer_insert_row(&E.buffer, 0, "", 0);
         E.buffer.dirty = 0;
-        editor_set_status_message("purr -- modal editor | Ctrl+S: save | Ctrl+Q: quit | :help");
+        editor_set_status_message("purre -- modal editor | Ctrl+S: save | Ctrl+Q: quit | :help");
     }
 
     while (!E.quit_requested) {

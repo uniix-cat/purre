@@ -15,6 +15,6 @@ enum HighlightType {
     HL_PREPROC
 };
 
-void syntax_highlight_line(const Buffer *b, int row_idx, AppendBuffer *ab, int col_offset, int max_cols);
+void syntax_highlight_line(const Buffer *b, int row_idx, AppendBuffer *ab, int col_offset, int max_cols, int sel_start, int sel_end);
 
 #endif /* PURR_SYNTAX_H */

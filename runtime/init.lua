@@ -9,7 +9,7 @@ purr.commands = {}
 
 -- :help command
 purr.commands.help = function()
-    purr.set_status("󰄛 purr: Normal [j:left, k:down, l:up, ;:right, a:insert, x:del, dd:cut, K:hover, :cmd] | :check (analyzer) | Ctrl+S (save), Ctrl+Q (quit)")
+    purr.set_status("󰄛 purre: Normal [j:left, k:down, l:up, ;:right, a:ins, v:vis, y:copy, p:paste, x:del, dd:cut, K:hover, :cmd] | :check | Ctrl+S (save), Ctrl+Q (quit)")
 end
 
 -- :check / :analyze command

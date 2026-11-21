@@ -1,20 +1,20 @@
-# 🐾 Purr Lua Plugin & Extensibility Guide
+# 🐾 Purre Lua Plugin & Extensibility Guide
 
 [English](PLUGINS.md) | [Русский](PLUGINS_RU.md)
 
-Purr is designed from the ground up to be lightweight, modular, and hackable. It embeds **LuaJIT 2.1**, giving you near-native execution speed for scripting, plugins, and custom tooling without bloating the core C codebase.
+Purre is designed from the ground up to be lightweight, modular, and hackable. It embeds **LuaJIT 2.1**, giving you near-native execution speed for scripting, plugins, and custom tooling without bloating the core C codebase.
 
-The editor's built-in LSP client, static analyzer engine, JSON parser, and commands are all written in pure Lua on top of the Purr C API.
+The editor's built-in LSP client, static analyzer engine, JSON parser, and commands are all written in pure Lua on top of the Purre C API.
 
 ---
 
 ## 🏗️ Architecture Overview
 
-Purr combines a minimal C event loop with LuaJIT:
+Purre combines a minimal C event loop with LuaJIT:
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│                      Purr Core (C)                     │
+│                      Purre Core (C)                    │
 │  - Terminal Raw Mode (termios, UTF-8, ANSI escape)     │
 │  - Text Buffer & Gutter (dynamic line arrays)          │
 │  - Non-blocking I/O poll (stdin + subprocess pipes)    │
@@ -32,13 +32,15 @@ Purr combines a minimal C event loop with LuaJIT:
 
 The runtime searches for configuration and scripts in:
 1. `runtime/init.lua` (relative to current working directory)
-2. `/usr/share/purr/runtime/init.lua` (system-wide installation)
+2. `~/.local/share/purre/runtime/init.lua` (user installation)
+3. `/usr/local/share/purre/runtime/init.lua` (local system installation)
+4. `/usr/share/purre/runtime/init.lua` (system-wide installation)
 
 ---
 
 ## 🛠️ The `purr` Global API
 
-When Purr initializes, it exposes a global `purr` table to the Lua state containing the following functions:
+When Purre initializes, it exposes a global `purr` table to the Lua state containing the following functions:
 
 ### 1. Buffer & Text Inspection
 

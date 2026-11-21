@@ -32,6 +32,10 @@ void editor_init(void) {
     snprintf(E.lsp_status, sizeof(E.lsp_status), "LSP: idle");
     E.quit_requested = 0;
     E.pending_delete = 0;
+    E.visual_start_x = 0;
+    E.visual_start_y = 0;
+    E.yank_buf = NULL;
+    E.yank_len = 0;
     E.lua_state = NULL;
     editor_clear_completions();
 
@@ -45,6 +49,10 @@ void editor_init(void) {
 }
 
 void editor_cleanup(void) {
+    if (E.yank_buf) {
+        free(E.yank_buf);
+        E.yank_buf = NULL;
+    }
     buffer_free(&E.buffer);
 }
 
@@ -258,6 +266,165 @@ static void editor_scroll(void) {
     }
 }
 
+static void editor_visual_get_line_selection(int filerow, int *sel_start, int *sel_end) {
+    *sel_start = -1;
+    *sel_end = -1;
+    if (E.mode != MODE_VISUAL) return;
+
+    int sy = E.visual_start_y;
+    int sx = E.visual_start_x;
+    int ey = E.cy;
+    int ex = E.cx;
+
+    if (sy > ey || (sy == ey && sx > ex)) {
+        int ty = sy; sy = ey; ey = ty;
+        int tx = sx; sx = ex; ex = tx;
+    }
+
+    if (filerow < sy || filerow > ey) return;
+
+    if (sy == ey) {
+        *sel_start = sx;
+        *sel_end = ex;
+    } else if (filerow == sy) {
+        *sel_start = sx;
+        *sel_end = (filerow < E.buffer.numrows) ? (int)E.buffer.rows[filerow].len : 999999;
+    } else if (filerow == ey) {
+        *sel_start = 0;
+        *sel_end = ex;
+    } else {
+        *sel_start = 0;
+        *sel_end = (filerow < E.buffer.numrows) ? (int)E.buffer.rows[filerow].len : 999999;
+    }
+}
+
+static void editor_visual_yank(void) {
+    if (E.mode != MODE_VISUAL) return;
+
+    int sy = E.visual_start_y;
+    int sx = E.visual_start_x;
+    int ey = E.cy;
+    int ex = E.cx;
+
+    if (sy > ey || (sy == ey && sx > ex)) {
+        int ty = sy; sy = ey; ey = ty;
+        int tx = sx; sx = ex; ex = tx;
+    }
+
+    if (sy >= E.buffer.numrows) return;
+    if (ey >= E.buffer.numrows) ey = E.buffer.numrows - 1;
+
+    free(E.yank_buf);
+    E.yank_buf = NULL;
+    E.yank_len = 0;
+
+    size_t total_len = 0;
+    for (int r = sy; r <= ey; r++) {
+        erow *row = &E.buffer.rows[r];
+        int s = (r == sy) ? sx : 0;
+        int e = (r == ey) ? ex : (int)row->len - 1;
+        if (s < 0) s = 0;
+        if (e >= (int)row->len) e = (int)row->len - 1;
+        if (e >= s) {
+            total_len += (e - s + 1);
+        }
+        if (r < ey) total_len++; /* newline */
+    }
+
+    if (total_len == 0) return;
+
+    E.yank_buf = malloc(total_len + 1);
+    if (!E.yank_buf) return;
+
+    size_t offset = 0;
+    for (int r = sy; r <= ey; r++) {
+        erow *row = &E.buffer.rows[r];
+        int s = (r == sy) ? sx : 0;
+        int e = (r == ey) ? ex : (int)row->len - 1;
+        if (s < 0) s = 0;
+        if (s < (int)row->len) {
+            if (e >= (int)row->len) e = (int)row->len - 1;
+            if (e >= s) {
+                int count = e - s + 1;
+                memcpy(E.yank_buf + offset, &row->chars[s], count);
+                offset += count;
+            }
+        }
+        if (r < ey) {
+            E.yank_buf[offset++] = '\n';
+        }
+    }
+    E.yank_buf[offset] = '\0';
+    E.yank_len = offset;
+
+    editor_set_status_message("Yanked %d characters", (int)E.yank_len);
+}
+
+static void editor_visual_delete(void) {
+    if (E.mode != MODE_VISUAL) return;
+
+    editor_visual_yank();
+
+    int sy = E.visual_start_y;
+    int sx = E.visual_start_x;
+    int ey = E.cy;
+    int ex = E.cx;
+
+    if (sy > ey || (sy == ey && sx > ex)) {
+        int ty = sy; sy = ey; ey = ty;
+        int tx = sx; sx = ex; ex = tx;
+    }
+
+    if (sy >= E.buffer.numrows) return;
+    if (ey >= E.buffer.numrows) ey = E.buffer.numrows - 1;
+
+    if (sy == ey) {
+        erow *row = &E.buffer.rows[sy];
+        if (sx < (int)row->len) {
+            if (ex >= (int)row->len) ex = (int)row->len - 1;
+            int del_count = ex - sx + 1;
+            if (del_count > 0) {
+                memmove(&row->chars[sx], &row->chars[ex + 1], row->len - (ex + 1));
+                row->len -= del_count;
+                row->chars[row->len] = '\0';
+                E.buffer.dirty++;
+            }
+        }
+        E.cx = sx;
+        E.cy = sy;
+    } else {
+        erow *first_row = &E.buffer.rows[sy];
+        erow *last_row = &E.buffer.rows[ey];
+
+        int last_keep_start = ex + 1;
+        int last_keep_len = (last_keep_start < (int)last_row->len) ? (last_row->len - last_keep_start) : 0;
+        int first_keep_len = (sx < (int)first_row->len) ? sx : (int)first_row->len;
+
+        char *combined = malloc(first_keep_len + last_keep_len + 1);
+        if (combined) {
+            if (first_keep_len > 0) memcpy(combined, first_row->chars, first_keep_len);
+            if (last_keep_len > 0) memcpy(combined + first_keep_len, &last_row->chars[last_keep_start], last_keep_len);
+            combined[first_keep_len + last_keep_len] = '\0';
+
+            free(first_row->chars);
+            first_row->chars = combined;
+            first_row->len = first_keep_len + last_keep_len;
+        }
+
+        for (int r = ey; r > sy; r--) {
+            buffer_delete_row(&E.buffer, r);
+        }
+
+        E.buffer.dirty++;
+        E.cx = sx;
+        E.cy = sy;
+    }
+
+    if (E.cy < E.buffer.numrows && E.cx > (int)E.buffer.rows[E.cy].len) {
+        E.cx = (int)E.buffer.rows[E.cy].len;
+    }
+}
+
 static void editor_draw_rows(AppendBuffer *ab) {
     int gw = editor_gutter_width();
     int text_cols = E.screen_cols - gw;
@@ -287,8 +454,12 @@ static void editor_draw_rows(AppendBuffer *ab) {
                 abuf_printf(ab, "\x1b[38;2;98;114;164m %4d │\x1b[0m ", (filerow + 1) % 10000);
             }
 
+            /* Visual selection bounds for this line */
+            int sel_start = -1, sel_end = -1;
+            editor_visual_get_line_selection(filerow, &sel_start, &sel_end);
+
             /* Syntax highlighting for text */
-            syntax_highlight_line(&E.buffer, filerow, ab, E.col_offset, text_cols);
+            syntax_highlight_line(&E.buffer, filerow, ab, E.col_offset, text_cols, sel_start, sel_end);
         }
 
         abuf_appends(ab, "\x1b[K"); /* Clear to end of line */
@@ -303,6 +474,7 @@ static void editor_draw_status_bar(AppendBuffer *ab) {
     const char *mode_str = "󰄛 NORMAL";
     if (E.mode == MODE_INSERT) mode_str = "󰄛 INSERT";
     else if (E.mode == MODE_COMMAND) mode_str = "󰄛 COMMAND";
+    else if (E.mode == MODE_VISUAL) mode_str = "󰄛 VISUAL";
 
     const char *ficon = get_file_icon(E.buffer.filetype);
 
@@ -726,6 +898,85 @@ void editor_process_key_event(int key, const char *utf8, int len) {
         return;
     }
 
+    /* VISUAL MODE */
+    if (E.mode == MODE_VISUAL) {
+        if (key == KEY_ESC || key == CTRL_KEY('c') || key == KEY_CTRL_C || (key == KEY_CHAR && utf8[0] == 'v')) {
+            E.mode = MODE_NORMAL;
+            editor_set_status_message("");
+            return;
+        }
+
+        if (key == KEY_CHAR && utf8[0] == 'y') {
+            editor_visual_yank();
+            E.mode = MODE_NORMAL;
+            return;
+        }
+
+        if (key == KEY_CHAR && (utf8[0] == 'd' || utf8[0] == 'x')) {
+            editor_visual_delete();
+            E.mode = MODE_NORMAL;
+            return;
+        }
+
+        if (key == KEY_CHAR && utf8[0] == 'c') {
+            editor_visual_delete();
+            E.mode = MODE_INSERT;
+            return;
+        }
+
+        /* Movement in Visual Mode */
+        if (key == KEY_CHAR && len == 1) {
+            char ch = utf8[0];
+            if (ch == 'j') { editor_move_cursor(KEY_ARROW_LEFT); return; }
+            if (ch == 'k') { editor_move_cursor(KEY_ARROW_DOWN); return; }
+            if (ch == 'l') { editor_move_cursor(KEY_ARROW_UP); return; }
+            if (ch == ';') { editor_move_cursor(KEY_ARROW_RIGHT); return; }
+            if (ch == '0') { E.cx = 0; return; }
+            if (ch == '$') {
+                if (E.cy < E.buffer.numrows) E.cx = (int)E.buffer.rows[E.cy].len;
+                return;
+            }
+            if (ch == 'g') { E.cy = 0; E.cx = 0; return; }
+            if (ch == 'G') {
+                if (E.buffer.numrows > 0) E.cy = E.buffer.numrows - 1;
+                E.cx = 0;
+                return;
+            }
+            if (ch == 'w') {
+                if (E.cy < E.buffer.numrows) {
+                    erow *r = &E.buffer.rows[E.cy];
+                    while (E.cx < (int)r->len && !isspace((unsigned char)r->chars[E.cx])) E.cx++;
+                    while (E.cx < (int)r->len && isspace((unsigned char)r->chars[E.cx])) E.cx++;
+                    if (E.cx >= (int)r->len && E.cy + 1 < E.buffer.numrows) {
+                        E.cy++;
+                        E.cx = 0;
+                    }
+                }
+                return;
+            }
+            if (ch == 'b') {
+                if (E.cx > 0) {
+                    erow *r = &E.buffer.rows[E.cy];
+                    while (E.cx > 0 && isspace((unsigned char)r->chars[E.cx - 1])) E.cx--;
+                    while (E.cx > 0 && !isspace((unsigned char)r->chars[E.cx - 1])) E.cx--;
+                } else if (E.cy > 0) {
+                    E.cy--;
+                    if (E.cy < E.buffer.numrows) E.cx = (int)E.buffer.rows[E.cy].len;
+                }
+                return;
+            }
+        }
+
+        if (key == KEY_ARROW_LEFT || key == KEY_ARROW_RIGHT ||
+            key == KEY_ARROW_UP || key == KEY_ARROW_DOWN ||
+            key == KEY_HOME || key == KEY_END || key == KEY_PAGE_UP || key == KEY_PAGE_DOWN) {
+            editor_move_cursor(key);
+            return;
+        }
+
+        return;
+    }
+
     /* NORMAL MODE */
     if (key == CTRL_KEY('c') || key == KEY_CTRL_C) {
         E.pending_delete = 0;
@@ -756,6 +1007,53 @@ void editor_process_key_event(int key, const char *utf8, int len) {
             break;
         case 'a':
             E.mode = MODE_INSERT;
+            break;
+        case 'v':
+            E.mode = MODE_VISUAL;
+            E.visual_start_x = E.cx;
+            E.visual_start_y = E.cy;
+            editor_set_status_message("-- VISUAL --");
+            break;
+        case 'p':
+            if (E.yank_buf && E.yank_len > 0) {
+                if (E.cy < E.buffer.numrows && E.cx < (int)E.buffer.rows[E.cy].len) {
+                    E.cx++;
+                }
+                char *copy = strdup(E.yank_buf);
+                if (copy) {
+                    char *line_str = strtok(copy, "\n");
+                    int first = 1;
+                    while (line_str) {
+                        if (!first) {
+                            buffer_insert_newline(&E.buffer, &E.cy, &E.cx);
+                        }
+                        buffer_insert_utf8(&E.buffer, E.cy, &E.cx, line_str, strlen(line_str));
+                        first = 0;
+                        line_str = strtok(NULL, "\n");
+                    }
+                    free(copy);
+                }
+                editor_set_status_message("Pasted %d characters", (int)E.yank_len);
+            }
+            break;
+        case 'P':
+            if (E.yank_buf && E.yank_len > 0) {
+                char *copy = strdup(E.yank_buf);
+                if (copy) {
+                    char *line_str = strtok(copy, "\n");
+                    int first = 1;
+                    while (line_str) {
+                        if (!first) {
+                            buffer_insert_newline(&E.buffer, &E.cy, &E.cx);
+                        }
+                        buffer_insert_utf8(&E.buffer, E.cy, &E.cx, line_str, strlen(line_str));
+                        first = 0;
+                        line_str = strtok(NULL, "\n");
+                    }
+                    free(copy);
+                }
+                editor_set_status_message("Pasted %d characters", (int)E.yank_len);
+            }
             break;
         case 'o':
             buffer_insert_row(&E.buffer, E.cy + 1, "", 0);

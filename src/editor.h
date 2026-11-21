@@ -8,7 +8,8 @@
 typedef enum {
     MODE_NORMAL,
     MODE_INSERT,
-    MODE_COMMAND
+    MODE_COMMAND,
+    MODE_VISUAL
 } EditorMode;
 
 typedef struct {
@@ -38,6 +39,11 @@ typedef struct {
     
     int quit_requested;
     int pending_delete;     /* For 'd' operator waiting for second key */
+
+    int visual_start_x;
+    int visual_start_y;
+    char *yank_buf;
+    size_t yank_len;
 
     CompletionItem completions[MAX_COMPLETIONS];
     int num_completions;

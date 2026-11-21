@@ -48,7 +48,7 @@ static const char *get_color_escape(int hl_type) {
     }
 }
 
-void syntax_highlight_line(const Buffer *b, int row_idx, AppendBuffer *ab, int col_offset, int max_cols) {
+void syntax_highlight_line(const Buffer *b, int row_idx, AppendBuffer *ab, int col_offset, int max_cols, int sel_start, int sel_end) {
     if (row_idx < 0 || row_idx >= b->numrows) return;
     const erow *row = &b->rows[row_idx];
     if (row->len == 0) return;
@@ -176,8 +176,9 @@ void syntax_highlight_line(const Buffer *b, int row_idx, AppendBuffer *ab, int c
         i++;
     }
 
-    /* Render characters to AppendBuffer with colors */
+    /* Render characters to AppendBuffer with colors & visual selection */
     int current_color = -1;
+    int current_in_sel = -1;
     int cur_rx = 0;
     int cols_drawn = 0;
     size_t col = 0;
@@ -191,10 +192,20 @@ void syntax_highlight_line(const Buffer *b, int row_idx, AppendBuffer *ab, int c
         if (col + char_len > row->len) char_len = (int)row->len - col;
 
         if (cur_rx >= col_offset) {
+            int in_sel = (sel_start >= 0 && (int)col >= sel_start && (int)col <= sel_end);
             int color = hl[col];
-            if (color != current_color) {
+
+            if (in_sel != current_in_sel || color != current_color) {
+                current_in_sel = in_sel;
                 current_color = color;
-                abuf_appends(ab, get_color_escape(color));
+                if (in_sel) {
+                    /* Dracula Visual Selection background rgb(68, 71, 90) + bright white text */
+                    abuf_appends(ab, "\x1b[48;2;68;71;90;38;2;248;248;242m");
+                } else {
+                    /* Reset background, set syntax foreground */
+                    abuf_appends(ab, "\x1b[49m");
+                    abuf_appends(ab, get_color_escape(color));
+                }
             }
             abuf_append(ab, &row->chars[col], char_len);
             cols_drawn += 1;

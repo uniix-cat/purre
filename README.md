@@ -1,18 +1,18 @@
-# Purr 🐾
+# Purre 🐾
 
-> Lightweight, modern modal terminal text editor written in clean C (<2500 lines) with built-in LSP, hybrid Tab autocomplete, static analysis, syntax highlighting, and LuaJIT extensibility — ready out of the box with zero configuration.
+> Lightweight, modern modal terminal text editor written in clean C (<2500 lines) with built-in LSP, hybrid Tab autocomplete, static analysis, Visual mode, syntax highlighting, and LuaJIT extensibility — ready out of the box with zero configuration.
 
 [English](README.md) | [Русский](README_RU.md) | [Lua Plugins](docs/PLUGINS.md)
 
 ---
 
-## 🎯 Why Purr?
+## 🎯 Why Purre?
 
 Modern text editing often feels polarized:
 - **Neovim distributions** (`LazyVim`, `LunarVim`, `AstroNvim`) require dozens of fragile plugins, complex Lua package managers (`lazy.nvim`, `mason.nvim`), and gigabytes of dependencies that break on routine updates.
 - **Micro and Nano** are simple, but lack built-in LSP intelligence, semantic autocompletion, and real-time compiler diagnostics.
 
-**Purr bridges this gap.** It delivers the full power of a modern IDE in a lightning-fast, self-contained terminal binary with zero setup.
+**Purre bridges this gap.** It delivers the full power of a modern IDE in a lightning-fast, self-contained terminal binary with zero setup.
 
 ### Key Highlights
 
@@ -22,7 +22,11 @@ Modern text editing often feels polarized:
 * **Ergonomic Home-Row Navigation (`jkl;`)**:
   - The obsolete `hjkl` layout from 1970s Lear Siegler terminals is replaced by **`jkl;`** (`j`: left, `k`: down, `l`: up, `;`: right). Your fingers stay naturally centered on the home row without shifting left.
   - Insert mode toggle is **`a`** directly at the cursor position.
+  - Visual mode selection is toggled with **`v`**.
   - Fail-safe universal hotkeys: `Ctrl+S` (save), `Ctrl+Q` (quit), `Ctrl+C` (escape to Normal Mode).
+* **Full Visual Mode Selection**:
+  - Highlight text character by character or across multiple lines.
+  - Quick yank (`y`), delete/cut (`d` / `x`), change (`c`), and paste (`p` / `P`).
 * **Hybrid Tab Autocomplete**:
   - Semantic completion from running LSP servers.
   - Instant automatic fallback to buffer word scanning and language keywords if an LSP is absent.
@@ -52,8 +56,8 @@ Modern text editing often feels polarized:
 
 ```bash
 # Clone the repository
-git clone https://github.com/Fred-Lght/purr.git
-cd purr
+git clone https://github.com/uniix-cat/purre.git
+cd purre
 
 # Compile (takes < 2 seconds)
 make
@@ -64,8 +68,8 @@ sudo make install
 # Option B: User-only install (in ~/.local/bin, no sudo required)
 make install PREFIX=$HOME/.local
 
-# Launch Purr from anywhere!
-purr [filename]
+# Launch Purre from anywhere!
+purre [filename]
 ```
 
 ---
@@ -76,7 +80,7 @@ purr [filename]
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl + S` | Save file immediately |
-| `Ctrl + Q` | Quit Purr (prompts if there are unsaved changes) |
+| `Ctrl + Q` | Quit Purre (prompts if there are unsaved changes) |
 | `Ctrl + C` / `Esc` | Return to **Normal Mode** / Close completion popup |
 
 ### Normal Mode (Default)
@@ -87,16 +91,28 @@ purr [filename]
 | **`l`** | Move cursor **up** (ring finger) |
 | **`;`** | Move cursor **right** (pinky finger) |
 | **`a`** | Enter **Insert Mode** at cursor |
+| **`v`** | Enter **Visual Mode** to select text |
 | `w` / `b` | Move word forward / backward |
 | `0` / `$` | Move to beginning / end of line |
 | `g` / `G` | Jump to top / bottom of buffer |
 | `o` / `O` | Insert newline below / above and switch to Insert Mode |
 | `x` | Delete character under cursor |
 | `d d` | Delete current line |
+| `p` / `P` | Paste yanked text after / at cursor |
 | `K` | LSP Hover (show documentation and types under cursor) |
 | `:` | Open Command Mode |
 
-### Insert Mode
+### Visual Mode (`v`)
+| Key | Action |
+| :--- | :--- |
+| `j` / `k` / `l` / `;` | Expand / shrink selection (left, down, up, right) |
+| `w` / `b` / `0` / `$` | Jump word forward / backward / line start / line end |
+| `y` | **Yank (copy)** selected text to clipboard buffer |
+| `d` / `x` | **Delete (cut)** selected text |
+| `c` | **Change** selected text (delete selection and switch to Insert Mode) |
+| `Esc` / `Ctrl + C` / `v` | Cancel selection and return to Normal Mode |
+
+### Insert Mode (`a`)
 | Key | Action |
 | :--- | :--- |
 | `Tab` | Trigger autocomplete / Cycle through completion items |
@@ -128,7 +144,7 @@ purr [filename]
 
 ## 🔌 Supported Languages & LSPs
 
-Purr automatically detects and connects to installed servers in your `$PATH`:
+Purre automatically detects and connects to installed servers in your `$PATH`:
 
 | Language | Primary LSP | Fallback / Alternatives | Linters & Analyzers |
 | :--- | :--- | :--- | :--- |
@@ -153,9 +169,9 @@ sudo pacman -S gopls          # Go
 
 ---
 
-## 🧩 Extending Purr with Lua
+## 🧩 Extending Purre with Lua
 
-Purr embeds LuaJIT 2.1. You can add custom commands, formatters, and status badges in `runtime/init.lua`.
+Purre embeds LuaJIT 2.1. You can add custom commands, formatters, and status badges in `runtime/init.lua`.
 
 See the full [Lua Plugin Documentation](docs/PLUGINS.md) for API details and code examples.
 
@@ -163,4 +179,4 @@ See the full [Lua Plugin Documentation](docs/PLUGINS.md) for API details and cod
 
 ## 📜 License
 
-MIT License. Designed with ❤️ by [Fred-Lght](https://github.com/Fred-Lght).
+MIT License. Designed with ❤️ by [uniix-cat](https://github.com/uniix-cat).
