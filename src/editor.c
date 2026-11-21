@@ -51,7 +51,29 @@ void editor_set_status_message(const char *fmt, ...) {
     E.status_msg_time = time(NULL);
 }
 
+static const char *get_file_icon(const char *ft) {
+    if (!ft) return " ";
+    if (strcmp(ft, "c") == 0) return " ";
+    if (strcmp(ft, "cpp") == 0) return " ";
+    if (strcmp(ft, "python") == 0) return " ";
+    if (strcmp(ft, "rust") == 0) return " ";
+    if (strcmp(ft, "go") == 0) return " ";
+    if (strcmp(ft, "lua") == 0) return " ";
+    if (strcmp(ft, "javascript") == 0 || strcmp(ft, "typescript") == 0) return " ";
+    if (strcmp(ft, "markdown") == 0) return " ";
+    if (strcmp(ft, "json") == 0) return " ";
+    if (strcmp(ft, "bash") == 0) return " ";
+    return " ";
+}
+
+static int editor_gutter_width(void) {
+    return 8;
+}
+
 static void editor_scroll(void) {
+    int text_cols = E.screen_cols - editor_gutter_width();
+    if (text_cols < 1) text_cols = 1;
+
     if (E.cy < E.row_offset) {
         E.row_offset = E.cy;
     }
@@ -62,20 +84,42 @@ static void editor_scroll(void) {
     if (E.cx < E.col_offset) {
         E.col_offset = E.cx;
     }
-    if (E.cx >= E.col_offset + E.screen_cols) {
-        E.col_offset = E.cx - E.screen_cols + 1;
+    if (E.cx >= E.col_offset + text_cols) {
+        E.col_offset = E.cx - text_cols + 1;
     }
 }
 
 static void editor_draw_rows(AppendBuffer *ab) {
+    int gw = editor_gutter_width();
+    int text_cols = E.screen_cols - gw;
+    if (text_cols < 1) text_cols = 1;
+
     for (int y = 0; y < E.screen_rows; y++) {
         int filerow = y + E.row_offset;
         if (filerow >= E.buffer.numrows) {
             /* Tildes for empty lines */
-            abuf_appends(ab, "\x1b[38;2;98;114;164m~\x1b[0m");
+            abuf_printf(ab, "\x1b[38;2;98;114;164m       │ ~\x1b[0m");
         } else {
-            /* Syntax highlighting */
-            syntax_highlight_line(&E.buffer, filerow, ab, E.col_offset, E.screen_cols);
+            /* Check for diagnostic icon in gutter */
+            const Diagnostic *d = buffer_get_line_diagnostic(&E.buffer, filerow);
+            if (d) {
+                if (d->severity == 1) {
+                    /* Red Error icon 󰅚 */
+                    abuf_printf(ab, "\x1b[38;2;255;85;85m 󰅚 %3d \x1b[38;2;98;114;164m│\x1b[0m ", (filerow + 1) % 1000);
+                } else if (d->severity == 2) {
+                    /* Yellow Warning icon 󰀪 */
+                    abuf_printf(ab, "\x1b[38;2;241;250;140m 󰀪 %3d \x1b[38;2;98;114;164m│\x1b[0m ", (filerow + 1) % 1000);
+                } else {
+                    /* Cyan Info icon 󰋽 */
+                    abuf_printf(ab, "\x1b[38;2;139;233;253m 󰋽 %3d \x1b[38;2;98;114;164m│\x1b[0m ", (filerow + 1) % 1000);
+                }
+            } else {
+                /* Dim line number */
+                abuf_printf(ab, "\x1b[38;2;98;114;164m   %3d │\x1b[0m ", (filerow + 1) % 1000);
+            }
+
+            /* Syntax highlighting for text */
+            syntax_highlight_line(&E.buffer, filerow, ab, E.col_offset, text_cols);
         }
 
         abuf_appends(ab, "\x1b[K"); /* Clear to end of line */
@@ -87,17 +131,36 @@ static void editor_draw_status_bar(AppendBuffer *ab) {
     /* Dracula status bar */
     abuf_appends(ab, "\x1b[7m"); /* Invert colors */
 
-    const char *mode_str = "[NORMAL]";
-    if (E.mode == MODE_INSERT) mode_str = "[INSERT]";
-    else if (E.mode == MODE_COMMAND) mode_str = "[COMMAND]";
+    const char *mode_str = "󰄛 NORMAL";
+    if (E.mode == MODE_INSERT) mode_str = "󰄛 INSERT";
+    else if (E.mode == MODE_COMMAND) mode_str = "󰄛 COMMAND";
+
+    const char *ficon = get_file_icon(E.buffer.filetype);
+
+    /* Count diagnostics */
+    int err_count = 0;
+    int warn_count = 0;
+    for (int i = 0; i < E.buffer.num_diagnostics; i++) {
+        if (E.buffer.diagnostics[i].severity == 1) err_count++;
+        else if (E.buffer.diagnostics[i].severity == 2) warn_count++;
+    }
+
+    char diag_badge[64] = "";
+    if (err_count > 0 || warn_count > 0) {
+        snprintf(diag_badge, sizeof(diag_badge), "󰅚 %d 󰀪 %d | ", err_count, warn_count);
+    } else {
+        snprintf(diag_badge, sizeof(diag_badge), "󰄬 clean | ");
+    }
 
     char lstatus[128], rstatus[128];
-    int len = snprintf(lstatus, sizeof(lstatus), " %s %s%s ",
+    int len = snprintf(lstatus, sizeof(lstatus), " [ %s ] %s%s%s ",
                        mode_str,
+                       ficon,
                        E.buffer.filename ? E.buffer.filename : "[No Name]",
-                       E.buffer.dirty ? " [+]" : "");
+                       E.buffer.dirty ? "  [+]" : "");
 
-    int rlen = snprintf(rstatus, sizeof(rstatus), " %s | %s | Ln %d, Col %d ",
+    int rlen = snprintf(rstatus, sizeof(rstatus), " %s%s | %s | Ln %d, Col %d ",
+                        diag_badge,
                         E.lsp_status,
                         E.buffer.filetype ? E.buffer.filetype : "text",
                         E.cy + 1, E.cx + 1);
@@ -123,10 +186,17 @@ static void editor_draw_message_bar(AppendBuffer *ab) {
     if (E.mode == MODE_COMMAND) {
         abuf_printf(ab, ":%s", E.command_buf);
     } else {
-        int msglen = strlen(E.status_msg);
-        if (msglen > E.screen_cols) msglen = E.screen_cols;
-        if (msglen && time(NULL) - E.status_msg_time < 5) {
-            abuf_append(ab, E.status_msg, msglen);
+        const Diagnostic *d = buffer_get_line_diagnostic(&E.buffer, E.cy);
+        if (d) {
+            const char *color = (d->severity == 1) ? "\x1b[1;38;2;255;85;85m" : "\x1b[1;38;2;241;250;140m";
+            const char *icon = (d->severity == 1) ? "󰅚 " : "󰀪 ";
+            abuf_printf(ab, "%s%s%s\x1b[0m", color, icon, d->message);
+        } else {
+            int msglen = strlen(E.status_msg);
+            if (msglen > E.screen_cols) msglen = E.screen_cols;
+            if (msglen && time(NULL) - E.status_msg_time < 5) {
+                abuf_append(ab, E.status_msg, msglen);
+            }
         }
     }
 }
@@ -155,7 +225,7 @@ void editor_refresh_screen(void) {
         abuf_printf(&ab, "\x1b[%d;%dH", E.screen_rows + 2, E.command_len + 2);
     } else {
         int cursor_y = (E.cy - E.row_offset) + 1;
-        int cursor_x = (E.cx - E.col_offset) + 1;
+        int cursor_x = (E.cx - E.col_offset) + 1 + editor_gutter_width();
         abuf_printf(&ab, "\x1b[%d;%dH", cursor_y, cursor_x);
     }
 

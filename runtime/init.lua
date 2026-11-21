@@ -1,13 +1,27 @@
 -- purr standard runtime initialization
 local lsp = dofile("runtime/lsp.lua")
+local analyzer = dofile("runtime/analyzer.lua")
 
 purr.lsp = lsp
+purr.analyzer = analyzer
 purr.commands = {}
 
 -- :help command
 purr.commands.help = function()
-    purr.set_status("purr: Normal [j:left, k:down, l:up, ;:right, a:insert, x:del, dd:cut, K:hover, :cmd] | Insert [Esc] | Global: Ctrl+S (save), Ctrl+Q (quit)")
+    purr.set_status("󰄛 purr: Normal [j:left, k:down, l:up, ;:right, a:insert, x:del, dd:cut, K:hover, :cmd] | :check (analyzer) | Ctrl+S (save), Ctrl+Q (quit)")
 end
+
+-- :check / :analyze command
+purr.commands.check = function()
+    local fn = purr.get_filename()
+    local ft = purr.get_filetype()
+    if fn and ft then
+        analyzer.run(fn, ft)
+    else
+        purr.set_status("No active file to analyze")
+    end
+end
+purr.commands.analyze = purr.commands.check
 
 -- :lsp command
 purr.commands.lsp = function(args)
@@ -20,9 +34,9 @@ purr.commands.lsp = function(args)
     elseif subcmd == "status" then
         local s = lsp.servers[ft]
         if s and s.is_ready then
-            purr.set_status(string.format("LSP: active (%s) for %s", s.active_cmd or "server", ft))
+            purr.set_status(string.format("󰄬 LSP: active (%s) for %s", s.active_cmd or "server", ft))
         else
-            purr.set_status("LSP: not running for " .. ft)
+            purr.set_status("󰅚 LSP: not running for " .. ft)
         end
     elseif subcmd == "hover" then
         lsp.hover()
@@ -65,4 +79,8 @@ end
 
 function purr.on_file_saved(filename)
     lsp.did_save(filename)
+    local ft = purr.get_filetype()
+    if ft then
+        analyzer.run(filename, ft)
+    end
 end

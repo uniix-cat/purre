@@ -116,11 +116,21 @@ function lsp.handle_message(server, msg)
         local uri = msg.params.uri or ""
         lsp.diagnostics[uri] = diags
 
+        local list = {}
+        for _, d in ipairs(diags) do
+            local line = (d.range and d.range.start and d.range.start.line or 0) + 1
+            local col = (d.range and d.range.start and d.range.start.character or 0) + 1
+            table.insert(list, {
+                line = line,
+                col = col,
+                severity = d.severity or 1,
+                message = d.message or ""
+            })
+        end
+        purr.set_diagnostics(list)
+
         if #diags > 0 then
             purr.set_lsp_status(string.format("⚠ %d issues", #diags))
-            local first = diags[1]
-            local line = (first.range and first.range.start and first.range.start.line or 0) + 1
-            purr.set_status(string.format("L%d: %s", line, first.message or ""))
         else
             purr.set_lsp_status(string.format("✓ LSP: %s", server.active_cmd or "ready"))
         end

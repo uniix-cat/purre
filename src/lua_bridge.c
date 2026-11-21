@@ -147,6 +147,40 @@ static int l_purr_open_file(lua_State *L) {
     return 1;
 }
 
+/* purr.set_diagnostics(diags_table) */
+static int l_purr_set_diagnostics(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    buffer_clear_diagnostics(&E.buffer);
+
+    int n = (int)lua_objlen(L, 1);
+    for (int i = 1; i <= n; i++) {
+        lua_rawgeti(L, 1, i);
+        if (lua_istable(L, -1)) {
+            lua_getfield(L, -1, "line");
+            int line = (int)lua_tointeger(L, -1) - 1;
+            lua_pop(L, 1);
+
+            lua_getfield(L, -1, "col");
+            int col = (int)lua_tointeger(L, -1) - 1;
+            lua_pop(L, 1);
+
+            lua_getfield(L, -1, "severity");
+            int sev = (int)lua_tointeger(L, -1);
+            if (sev <= 0) sev = 1;
+            lua_pop(L, 1);
+
+            lua_getfield(L, -1, "message");
+            const char *msg = lua_tostring(L, -1);
+            if (msg) {
+                buffer_add_diagnostic(&E.buffer, line, col, sev, msg);
+            }
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+    return 0;
+}
+
 /* purr.spawn_async(cmd, args_table, callback_func) -> proc_id */
 static int l_purr_spawn_async(lua_State *L) {
     const char *cmd = luaL_checkstring(L, 1);
@@ -256,6 +290,7 @@ static const luaL_Reg purr_api[] = {
     {"insert_text", l_purr_insert_text},
     {"save_file", l_purr_save_file},
     {"open_file", l_purr_open_file},
+    {"set_diagnostics", l_purr_set_diagnostics},
     {"spawn_async", l_purr_spawn_async},
     {"send_stdin", l_purr_send_stdin},
     {"close_proc", l_purr_close_proc},

@@ -13,6 +13,42 @@ void buffer_init(Buffer *b) {
     b->rows = NULL;
     b->numrows = 0;
     b->dirty = 0;
+    b->diagnostics = NULL;
+    b->num_diagnostics = 0;
+}
+
+void buffer_clear_diagnostics(Buffer *b) {
+    if (!b) return;
+    for (int i = 0; i < b->num_diagnostics; i++) {
+        free(b->diagnostics[i].message);
+    }
+    free(b->diagnostics);
+    b->diagnostics = NULL;
+    b->num_diagnostics = 0;
+}
+
+void buffer_add_diagnostic(Buffer *b, int line, int col, int severity, const char *msg) {
+    if (!b || !msg) return;
+    b->diagnostics = realloc(b->diagnostics, sizeof(Diagnostic) * (b->num_diagnostics + 1));
+    Diagnostic *d = &b->diagnostics[b->num_diagnostics++];
+    d->line = line;
+    d->col = col;
+    d->severity = severity;
+    d->message = strdup(msg);
+}
+
+const Diagnostic *buffer_get_line_diagnostic(const Buffer *b, int line) {
+    if (!b || !b->diagnostics) return NULL;
+    const Diagnostic *best = NULL;
+    for (int i = 0; i < b->num_diagnostics; i++) {
+        if (b->diagnostics[i].line == line) {
+            /* Pick highest severity (1 = error is highest) */
+            if (!best || b->diagnostics[i].severity < best->severity) {
+                best = &b->diagnostics[i];
+            }
+        }
+    }
+    return best;
 }
 
 void buffer_free(Buffer *b) {
@@ -23,6 +59,7 @@ void buffer_free(Buffer *b) {
     free(b->rows);
     free(b->filename);
     free(b->filetype);
+    buffer_clear_diagnostics(b);
     buffer_init(b);
 }
 
