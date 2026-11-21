@@ -137,6 +137,16 @@ static int l_purr_save_file(lua_State *L) {
     return 1;
 }
 
+/* purr.open_file(path) */
+static int l_purr_open_file(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    int ret = buffer_open(&E.buffer, path);
+    E.cx = 0;
+    E.cy = 0;
+    lua_pushboolean(L, ret == 0);
+    return 1;
+}
+
 /* purr.spawn_async(cmd, args_table, callback_func) -> proc_id */
 static int l_purr_spawn_async(lua_State *L) {
     const char *cmd = luaL_checkstring(L, 1);
@@ -245,6 +255,7 @@ static const luaL_Reg purr_api[] = {
     {"set_cursor", l_purr_set_cursor},
     {"insert_text", l_purr_insert_text},
     {"save_file", l_purr_save_file},
+    {"open_file", l_purr_open_file},
     {"spawn_async", l_purr_spawn_async},
     {"send_stdin", l_purr_send_stdin},
     {"close_proc", l_purr_close_proc},

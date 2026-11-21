@@ -237,19 +237,19 @@ static void editor_move_cursor(int key) {
     int rowlen = row ? (int)row->len : 0;
 
     switch (key) {
-        case 'h':
+        case 'j':
         case KEY_ARROW_LEFT:
             if (E.cx > 0) E.cx--;
             break;
-        case 'l':
+        case ';':
         case KEY_ARROW_RIGHT:
             if (E.cx < rowlen) E.cx++;
             break;
-        case 'k':
+        case 'l':
         case KEY_ARROW_UP:
             if (E.cy > 0) E.cy--;
             break;
-        case 'j':
+        case 'k':
         case KEY_ARROW_DOWN:
             if (E.cy < E.buffer.numrows - 1) E.cy++;
             break;
@@ -363,13 +363,7 @@ void editor_process_keypress(int c) {
             E.command_len = 0;
             E.command_buf[0] = '\0';
             break;
-        case 'i':
-            E.mode = MODE_INSERT;
-            break;
         case 'a':
-            if (E.cy < E.buffer.numrows && E.cx < (int)E.buffer.rows[E.cy].len) {
-                E.cx++;
-            }
             E.mode = MODE_INSERT;
             break;
         case 'o':
@@ -437,15 +431,19 @@ void editor_process_keypress(int c) {
             }
             break;
         }
-        case 'h':
         case 'j':
         case 'k':
         case 'l':
+        case ';':
         case KEY_ARROW_LEFT:
         case KEY_ARROW_RIGHT:
         case KEY_ARROW_UP:
         case KEY_ARROW_DOWN:
             editor_move_cursor(c);
+            break;
+        case 'K':
+            /* Quick LSP hover documentation */
+            lua_bridge_execute_command("lsp", "hover");
             break;
         case KEY_PAGE_UP:
             E.cy = E.row_offset - E.screen_rows;

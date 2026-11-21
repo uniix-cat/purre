@@ -1,26 +1,34 @@
 -- purr standard runtime initialization
 local lsp = dofile("runtime/lsp.lua")
 
+purr.lsp = lsp
 purr.commands = {}
 
 -- :help command
 purr.commands.help = function()
-    purr.set_status("purr: Normal (hjkl, i, a, o, dd, x, :), Insert (Esc), Command (:w, :q, :help, :lsp), Global: Ctrl+S (save), Ctrl+Q (quit)")
+    purr.set_status("purr: Normal [j:left, k:down, l:up, ;:right, a:insert, x:del, dd:cut, K:hover, :cmd] | Insert [Esc] | Global: Ctrl+S (save), Ctrl+Q (quit)")
 end
 
 -- :lsp command
 purr.commands.lsp = function(args)
     local ft = purr.get_filetype()
-    if args == "start" or args == "" then
+    local subcmd, rest = args:match("^(%S+)%s*(.*)$")
+    subcmd = subcmd or ""
+
+    if subcmd == "start" or subcmd == "" then
         lsp.start(ft)
-    elseif args == "status" then
+    elseif subcmd == "status" then
         local s = lsp.servers[ft]
         if s and s.is_ready then
-            purr.set_status("LSP server active for " .. ft)
+            purr.set_status(string.format("LSP: active (%s) for %s", s.active_cmd or "server", ft))
         else
-            purr.set_status("LSP server not running for " .. ft)
+            purr.set_status("LSP: not running for " .. ft)
         end
-    elseif args == "stop" then
+    elseif subcmd == "hover" then
+        lsp.hover()
+    elseif subcmd == "def" or subcmd == "definition" then
+        lsp.definition()
+    elseif subcmd == "stop" then
         local s = lsp.servers[ft]
         if s and s.proc_id then
             purr.close_proc(s.proc_id)
@@ -28,8 +36,23 @@ purr.commands.lsp = function(args)
             purr.set_lsp_status("LSP: stopped")
             purr.set_status("LSP server stopped")
         end
+    elseif subcmd == "set" then
+        local lang, cmd = rest:match("^(%S+)%s+(%S+)$")
+        if lang and cmd then
+            lsp.register(lang, { cmd = cmd, args = {} })
+            purr.set_status(string.format("Registered LSP '%s' for %s", cmd, lang))
+        else
+            purr.set_status("Usage: :lsp set <language> <command>")
+        end
+    elseif subcmd == "list" then
+        local langs = {}
+        for k, _ in pairs(lsp.registry) do
+            table.insert(langs, k)
+        end
+        table.sort(langs)
+        purr.set_status("Supported LSP languages: " .. table.concat(langs, ", "))
     else
-        purr.set_status("Usage: :lsp [start|status|stop]")
+        purr.set_status("Usage: :lsp [start|status|hover|def|stop|list|set <lang> <cmd>]")
     end
 end
 

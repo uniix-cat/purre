@@ -126,7 +126,15 @@ int terminal_get_window_size(int *rows, int *cols) {
     return 0;
 }
 
+static int unread_char = -1;
+
 int terminal_read_key(int fd) {
+    if (unread_char != -1) {
+        int k = unread_char;
+        unread_char = -1;
+        return k;
+    }
+
     char c;
     ssize_t nread = read(fd, &c, 1);
     if (nread == 0) {
@@ -148,6 +156,11 @@ int terminal_read_key(int fd) {
         }
 
         if (read(fd, &seq[0], 1) != 1) return KEY_ESC;
+        if (seq[0] != '[' && seq[0] != 'O') {
+            unread_char = (unsigned char)seq[0];
+            return KEY_ESC;
+        }
+
         if (read(fd, &seq[1], 1) != 1) return KEY_ESC;
 
         if (seq[0] == '[') {
