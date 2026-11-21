@@ -1,0 +1,9 @@
+# Build artifacts
+purr
+src/*.o
+*.o
+
+# Editor temporary files
+*.swp
+*.swo
+*~
