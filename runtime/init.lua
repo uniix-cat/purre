@@ -84,3 +84,8 @@ function purr.on_file_saved(filename)
         analyzer.run(filename, ft)
     end
 end
+
+-- Completion lifecycle hook
+function purr.on_completion_request()
+    lsp.request_completion()
+end

@@ -432,4 +432,67 @@ function lsp.definition()
     })
 end
 
+-- Tab completion request
+function lsp.request_completion()
+    local ft = purr.get_filetype()
+    local server = lsp.servers[ft]
+    if not server or not server.is_ready then
+        purr.clear_completions()
+        return
+    end
+
+    local row, col = purr.get_cursor()
+    local fn = purr.get_filename() or "untitled"
+
+    local req_id = server.request_id
+    server.request_id = server.request_id + 1
+
+    server.pending_requests[req_id] = function(result, err)
+        if err or not result then
+            purr.clear_completions()
+            return
+        end
+
+        local raw_items = result.items or result
+        if type(raw_items) ~= "table" then
+            purr.clear_completions()
+            return
+        end
+
+        local items = {}
+        for i = 1, math.min(#raw_items, 25) do
+            local item = raw_items[i]
+            if type(item) == "table" and item.label then
+                table.insert(items, {
+                    label = item.label,
+                    insert_text = item.insertText or item.label,
+                    kind = item.kind or 1
+                })
+            elseif type(item) == "string" then
+                table.insert(items, {
+                    label = item,
+                    insert_text = item,
+                    kind = 1
+                })
+            end
+        end
+
+        if #items > 0 then
+            purr.set_completions(items)
+        else
+            purr.clear_completions()
+        end
+    end
+
+    lsp.send_rpc(server, {
+        jsonrpc = "2.0",
+        id = req_id,
+        method = "textDocument/completion",
+        params = {
+            textDocument = { uri = path_to_uri(fn) },
+            position = { line = row - 1, character = col - 1 }
+        }
+    })
+end
+
 return lsp

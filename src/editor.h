@@ -12,6 +12,14 @@ typedef enum {
 } EditorMode;
 
 typedef struct {
+    char label[64];
+    char insert_text[64];
+    int kind;
+} CompletionItem;
+
+#define MAX_COMPLETIONS 32
+
+typedef struct {
     int cx, cy;             /* Cursor buffer position (col, row) */
     int row_offset;         /* Scroll vertical offset */
     int col_offset;         /* Scroll horizontal offset */
@@ -31,6 +39,11 @@ typedef struct {
     int quit_requested;
     int pending_delete;     /* For 'd' operator waiting for second key */
 
+    CompletionItem completions[MAX_COMPLETIONS];
+    int num_completions;
+    int completion_selected;
+    int completion_active;
+
     void *lua_state;        /* lua_State pointer */
 } Editor;
 
@@ -43,5 +56,9 @@ void editor_refresh_screen(void);
 void editor_process_keypress(int c);
 void editor_process_key_event(int key, const char *utf8, int len);
 void editor_execute_command(const char *cmd);
+
+void editor_clear_completions(void);
+void editor_add_completion(const char *label, const char *insert_text, int kind);
+void editor_accept_completion(void);
 
 #endif /* PURR_EDITOR_H */

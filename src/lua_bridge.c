@@ -181,6 +181,47 @@ static int l_purr_set_diagnostics(lua_State *L) {
     return 0;
 }
 
+/* purr.set_completions(items_table) */
+static int l_purr_set_completions(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    editor_clear_completions();
+
+    int n = (int)lua_objlen(L, 1);
+    for (int i = 1; i <= n && i <= MAX_COMPLETIONS; i++) {
+        lua_rawgeti(L, 1, i);
+        if (lua_istable(L, -1)) {
+            lua_getfield(L, -1, "label");
+            const char *label = lua_tostring(L, -1);
+            lua_pop(L, 1);
+
+            lua_getfield(L, -1, "insert_text");
+            const char *insert_text = lua_tostring(L, -1);
+            lua_pop(L, 1);
+
+            lua_getfield(L, -1, "kind");
+            int kind = (int)lua_tointeger(L, -1);
+            lua_pop(L, 1);
+
+            if (label) {
+                editor_add_completion(label, insert_text ? insert_text : label, kind);
+            }
+        }
+        lua_pop(L, 1);
+    }
+    if (E.num_completions > 0) {
+        E.completion_active = 1;
+        E.completion_selected = 0;
+    }
+    return 0;
+}
+
+/* purr.clear_completions() */
+static int l_purr_clear_completions(lua_State *L) {
+    (void)L;
+    editor_clear_completions();
+    return 0;
+}
+
 /* purr.spawn_async(cmd, args_table, callback_func) -> proc_id */
 static int l_purr_spawn_async(lua_State *L) {
     const char *cmd = luaL_checkstring(L, 1);
@@ -291,6 +332,8 @@ static const luaL_Reg purr_api[] = {
     {"save_file", l_purr_save_file},
     {"open_file", l_purr_open_file},
     {"set_diagnostics", l_purr_set_diagnostics},
+    {"set_completions", l_purr_set_completions},
+    {"clear_completions", l_purr_clear_completions},
     {"spawn_async", l_purr_spawn_async},
     {"send_stdin", l_purr_send_stdin},
     {"close_proc", l_purr_close_proc},
@@ -390,6 +433,23 @@ void lua_bridge_on_file_saved(const char *filename) {
         lua_pushstring(L, filename ? filename : "");
         if (lua_pcall(L, 1, 0, 0) != 0) {
             editor_set_status_message("LSP error: %s", lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+    } else {
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+}
+
+void lua_bridge_request_completion(void) {
+    if (!L) return;
+    lua_getglobal(L, "purr");
+    if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
+
+    lua_getfield(L, -1, "on_completion_request");
+    if (lua_isfunction(L, -1)) {
+        if (lua_pcall(L, 0, 0, 0) != 0) {
+            editor_set_status_message("Completion err: %s", lua_tostring(L, -1));
             lua_pop(L, 1);
         }
     } else {

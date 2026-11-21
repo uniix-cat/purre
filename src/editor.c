@@ -13,6 +13,10 @@
 
 Editor E;
 
+static int editor_gutter_width(void) {
+    return 8;
+}
+
 void editor_init(void) {
     E.cx = 0;
     E.cy = 0;
@@ -29,6 +33,7 @@ void editor_init(void) {
     E.quit_requested = 0;
     E.pending_delete = 0;
     E.lua_state = NULL;
+    editor_clear_completions();
 
     buffer_init(&E.buffer);
 
@@ -41,6 +46,171 @@ void editor_init(void) {
 
 void editor_cleanup(void) {
     buffer_free(&E.buffer);
+}
+
+void editor_clear_completions(void) {
+    E.num_completions = 0;
+    E.completion_selected = 0;
+    E.completion_active = 0;
+}
+
+void editor_add_completion(const char *label, const char *insert_text, int kind) {
+    if (E.num_completions >= MAX_COMPLETIONS) return;
+    CompletionItem *item = &E.completions[E.num_completions++];
+    strncpy(item->label, label ? label : "", sizeof(item->label) - 1);
+    item->label[sizeof(item->label) - 1] = '\0';
+    strncpy(item->insert_text, insert_text ? insert_text : item->label, sizeof(item->insert_text) - 1);
+    item->insert_text[sizeof(item->insert_text) - 1] = '\0';
+    item->kind = kind;
+}
+
+void editor_accept_completion(void) {
+    if (!E.completion_active || E.num_completions == 0) return;
+    CompletionItem *item = &E.completions[E.completion_selected];
+
+    /* Find the prefix word before cursor to replace */
+    erow *row = (E.cy < E.buffer.numrows) ? &E.buffer.rows[E.cy] : NULL;
+    if (row && E.cx > 0) {
+        int start = E.cx - 1;
+        while (start >= 0 && (isalnum((unsigned char)row->chars[start]) || row->chars[start] == '_')) {
+            start--;
+        }
+        start++;
+        int prefix_len = E.cx - start;
+        if (prefix_len > 0) {
+            memmove(&row->chars[start], &row->chars[E.cx], row->len - E.cx + 1);
+            row->len -= prefix_len;
+            E.cx = start;
+        }
+    }
+
+    /* Insert completion text */
+    int len = strlen(item->insert_text);
+    buffer_insert_utf8(&E.buffer, E.cy, &E.cx, item->insert_text, len);
+    editor_clear_completions();
+}
+
+static const char *get_completion_kind_icon(int kind) {
+    switch (kind) {
+        case 2:
+        case 3:  return "󰊕 "; /* Function / Method */
+        case 4:  return "󰌋 "; /* Constructor */
+        case 5:
+        case 6:  return "󰆧 "; /* Variable / Field */
+        case 7:
+        case 8:  return "󰆧 "; /* Class / Interface */
+        case 9:  return "󰏗 "; /* Module */
+        case 14: return "󰌋 "; /* Keyword */
+        case 15: return "󰉿 "; /* Snippet */
+        default: return "󰛡 "; /* Text / Generic */
+    }
+}
+
+static void editor_draw_completion_menu(AppendBuffer *ab) {
+    if (!E.completion_active || E.num_completions == 0) return;
+
+    erow *row = (E.cy >= 0 && E.cy < E.buffer.numrows) ? &E.buffer.rows[E.cy] : NULL;
+    int rx = buffer_cx_to_rx(row, E.cx);
+    int cursor_y = (E.cy - E.row_offset) + 1;
+    int cursor_x = (rx - E.col_offset) + 1 + editor_gutter_width();
+
+    int menu_y = cursor_y + 1;
+    int max_display = 6;
+    int count = E.num_completions < max_display ? E.num_completions : max_display;
+    if (menu_y + count > E.screen_rows + 1) {
+        menu_y = cursor_y - count;
+        if (menu_y < 1) menu_y = 1;
+    }
+
+    int menu_x = cursor_x;
+    if (menu_x + 28 > E.screen_cols) {
+        menu_x = E.screen_cols - 28;
+        if (menu_x < 1) menu_x = 1;
+    }
+
+    abuf_appends(ab, "\x1b[s"); /* Save cursor position */
+
+    for (int i = 0; i < count; i++) {
+        CompletionItem *item = &E.completions[i];
+        abuf_printf(ab, "\x1b[%d;%dH", menu_y + i, menu_x);
+
+        if (i == E.completion_selected) {
+            /* Dracula selection color */
+            abuf_appends(ab, "\x1b[48;2;98;114;164;38;2;255;255;255m");
+        } else {
+            /* Dracula dark menu background */
+            abuf_appends(ab, "\x1b[48;2;40;42;54;38;2;248;248;242m");
+        }
+
+        const char *kicon = get_completion_kind_icon(item->kind);
+        char display_label[22];
+        snprintf(display_label, sizeof(display_label), "%-20s", item->label);
+        abuf_printf(ab, " %s%-20s ", kicon, display_label);
+        abuf_appends(ab, "\x1b[0m");
+    }
+
+    abuf_appends(ab, "\x1b[u"); /* Restore cursor position */
+}
+
+static void editor_handle_newline(void) {
+    if (E.cy >= E.buffer.numrows) {
+        buffer_insert_newline(&E.buffer, &E.cy, &E.cx);
+        return;
+    }
+
+    erow *cur = &E.buffer.rows[E.cy];
+    int indent_len = 0;
+    while (indent_len < (int)cur->len && (cur->chars[indent_len] == ' ' || cur->chars[indent_len] == '\t')) {
+        indent_len++;
+    }
+
+    /* Check if Enter between { and } */
+    int between_braces = 0;
+    if (E.cx > 0 && E.cx < (int)cur->len) {
+        char prev = cur->chars[E.cx - 1];
+        char next = cur->chars[E.cx];
+        if (prev == '{' && next == '}') {
+            between_braces = 1;
+        }
+    }
+
+    /* Extra indent if line ends with block starter */
+    int extra_indent = 0;
+    int k = E.cx - 1;
+    while (k >= 0 && isspace((unsigned char)cur->chars[k])) k--;
+    if (k >= 0) {
+        char end_ch = cur->chars[k];
+        if (end_ch == '{' || end_ch == ':' || end_ch == '(' || end_ch == '[') {
+            extra_indent = 4;
+        }
+    }
+
+    if (between_braces) {
+        buffer_insert_newline(&E.buffer, &E.cy, &E.cx);
+        if (indent_len > 0) {
+            int zero = 0;
+            buffer_insert_utf8(&E.buffer, E.cy, &zero, cur->chars, indent_len);
+        }
+
+        int target_cy = E.cy - 1;
+        buffer_insert_row(&E.buffer, target_cy + 1, "", 0);
+        E.cy = target_cy + 1;
+        E.cx = 0;
+
+        if (indent_len > 0) {
+            buffer_insert_utf8(&E.buffer, E.cy, &E.cx, cur->chars, indent_len);
+        }
+        buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "    ", 4);
+        return;
+    }
+
+    buffer_insert_newline(&E.buffer, &E.cy, &E.cx);
+    if (indent_len > 0) {
+        buffer_insert_utf8(&E.buffer, E.cy, &E.cx, cur->chars, indent_len);
+    }
+    if (extra_indent > 0) {
+        buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "    ", 4);
+    }
 }
 
 void editor_set_status_message(const char *fmt, ...) {
@@ -64,10 +234,6 @@ static const char *get_file_icon(const char *ft) {
     if (strcmp(ft, "json") == 0) return " ";
     if (strcmp(ft, "bash") == 0) return " ";
     return " ";
-}
-
-static int editor_gutter_width(void) {
-    return 8;
 }
 
 static void editor_scroll(void) {
@@ -221,6 +387,7 @@ void editor_refresh_screen(void) {
     editor_draw_rows(&ab);
     editor_draw_status_bar(&ab);
     editor_draw_message_bar(&ab);
+    editor_draw_completion_menu(&ab);
 
     /* Position cursor with visual render column (rx) */
     if (E.mode == MODE_COMMAND) {
@@ -392,12 +559,71 @@ void editor_process_key_event(int key, const char *utf8, int len) {
     /* INSERT MODE */
     if (E.mode == MODE_INSERT) {
         if (key == KEY_ESC || key == CTRL_KEY('c') || key == KEY_CTRL_C) {
+            if (E.completion_active) {
+                editor_clear_completions();
+                return;
+            }
             E.mode = MODE_NORMAL;
-        } else if (key == KEY_ENTER) {
-            buffer_insert_newline(&E.buffer, &E.cy, &E.cx);
-        } else if (key == KEY_BACKSPACE) {
+            return;
+        }
+
+        if (key == KEY_ENTER) {
+            if (E.completion_active) {
+                editor_accept_completion();
+                return;
+            }
+            editor_handle_newline();
+            return;
+        }
+
+        if (key == '\t') {
+            if (E.completion_active && E.num_completions > 0) {
+                /* Cycle through completion candidates */
+                E.completion_selected = (E.completion_selected + 1) % E.num_completions;
+                return;
+            }
+
+            /* Check if cursor is right after an identifier character */
+            erow *row = (E.cy < E.buffer.numrows) ? &E.buffer.rows[E.cy] : NULL;
+            int has_word_prefix = 0;
+            if (row && E.cx > 0) {
+                char prev = row->chars[E.cx - 1];
+                if (isalnum((unsigned char)prev) || prev == '_' || prev == '.' || prev == '>') {
+                    has_word_prefix = 1;
+                }
+            }
+
+            if (has_word_prefix) {
+                lua_bridge_request_completion();
+            } else {
+                buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "    ", 4);
+            }
+            return;
+        }
+
+        if (key == KEY_BACKSPACE) {
+            editor_clear_completions();
+            erow *row = (E.cy < E.buffer.numrows) ? &E.buffer.rows[E.cy] : NULL;
+            if (row && E.cx > 0 && E.cx < (int)row->len) {
+                char prev = row->chars[E.cx - 1];
+                char curr = row->chars[E.cx];
+                if ((prev == '(' && curr == ')') ||
+                    (prev == '[' && curr == ']') ||
+                    (prev == '{' && curr == '}') ||
+                    (prev == '"' && curr == '"') ||
+                    (prev == '\'' && curr == '\'')) {
+                    buffer_delete_char(&E.buffer, &E.cy, &E.cx);
+                    int r = E.cy, col = E.cx + 1;
+                    buffer_delete_char(&E.buffer, &r, &col);
+                    return;
+                }
+            }
             buffer_delete_char(&E.buffer, &E.cy, &E.cx);
-        } else if (key == KEY_DEL) {
+            return;
+        }
+
+        if (key == KEY_DEL) {
+            editor_clear_completions();
             if (E.cy < E.buffer.numrows) {
                 erow *r = &E.buffer.rows[E.cy];
                 int next_col = buffer_next_utf8_char(r, E.cx);
@@ -408,13 +634,83 @@ void editor_process_key_event(int key, const char *utf8, int len) {
                     E.buffer.dirty++;
                 }
             }
-        } else if (key == KEY_ARROW_LEFT || key == KEY_ARROW_RIGHT ||
-                   key == KEY_ARROW_UP || key == KEY_ARROW_DOWN) {
+            return;
+        }
+
+        if (key == KEY_ARROW_LEFT || key == KEY_ARROW_RIGHT ||
+            key == KEY_ARROW_UP || key == KEY_ARROW_DOWN) {
+            editor_clear_completions();
             editor_move_cursor(key);
-        } else if (key == '\t') {
-            buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "    ", 4);
-        } else if (key == KEY_CHAR && len > 0) {
+            return;
+        }
+
+        if (key == KEY_CHAR && len > 0) {
+            /* Close completion menu on space or non-identifier */
+            if (len == 1) {
+                char ch = utf8[0];
+                erow *row = (E.cy < E.buffer.numrows) ? &E.buffer.rows[E.cy] : NULL;
+                char next_ch = (row && E.cx < (int)row->len) ? row->chars[E.cx] : '\0';
+
+                /* Overtype / step-over if typing closing bracket right before it */
+                if ((ch == ')' && next_ch == ')') ||
+                    (ch == ']' && next_ch == ']') ||
+                    (ch == '}' && next_ch == '}') ||
+                    (ch == '"' && next_ch == '"') ||
+                    (ch == '\'' && next_ch == '\'')) {
+                    E.cx++;
+                    editor_clear_completions();
+                    return;
+                }
+
+                /* Smart unindent when typing '}' on empty indented line */
+                if (ch == '}') {
+                    if (row && E.cx >= 4) {
+                        int all_spaces = 1;
+                        for (int i = 0; i < E.cx; i++) {
+                            if (row->chars[i] != ' ' && row->chars[i] != '\t') { all_spaces = 0; break; }
+                        }
+                        if (all_spaces) {
+                            for (int i = 0; i < 4; i++) {
+                                buffer_delete_char(&E.buffer, &E.cy, &E.cx);
+                            }
+                        }
+                    }
+                    buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "}", 1);
+                    editor_clear_completions();
+                    return;
+                }
+
+                /* Auto-closing pairs */
+                if (ch == '(') {
+                    buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "()", 2);
+                    E.cx--;
+                    editor_clear_completions();
+                    return;
+                } else if (ch == '[') {
+                    buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "[]", 2);
+                    E.cx--;
+                    editor_clear_completions();
+                    return;
+                } else if (ch == '{') {
+                    buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "{}", 2);
+                    E.cx--;
+                    editor_clear_completions();
+                    return;
+                } else if (ch == '"') {
+                    buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "\"\"", 2);
+                    E.cx--;
+                    editor_clear_completions();
+                    return;
+                } else if (ch == '\'') {
+                    buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "''", 2);
+                    E.cx--;
+                    editor_clear_completions();
+                    return;
+                }
+            }
+
             buffer_insert_utf8(&E.buffer, E.cy, &E.cx, utf8, len);
+            editor_clear_completions();
         }
         return;
     }
