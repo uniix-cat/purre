@@ -114,22 +114,100 @@ static void buffer_row_append_string(erow *row, const char *s, size_t len) {
     row->chars[row->len] = '\0';
 }
 
-void buffer_insert_char(Buffer *b, int row, int col, int c) {
+int buffer_prev_utf8_char(const erow *row, int col) {
+    if (!row || col <= 0) return 0;
+    int i = col - 1;
+    while (i > 0 && ((unsigned char)row->chars[i] & 0xC0) == 0x80) {
+        i--;
+    }
+    return i;
+}
+
+int buffer_next_utf8_char(const erow *row, int col) {
+    if (!row || col >= (int)row->len) return row ? (int)row->len : 0;
+    unsigned char c = (unsigned char)row->chars[col];
+    int len = 1;
+    if ((c & 0xE0) == 0xC0) len = 2;
+    else if ((c & 0xF0) == 0xE0) len = 3;
+    else if ((c & 0xF8) == 0xF0) len = 4;
+    if (col + len > (int)row->len) len = (int)row->len - col;
+    return col + len;
+}
+
+int buffer_cx_to_rx(const erow *row, int cx) {
+    if (!row) return 0;
+    int rx = 0;
+    int i = 0;
+    while (i < cx && i < (int)row->len) {
+        if (row->chars[i] == '\t') {
+            rx += 4 - (rx % 4);
+            i++;
+        } else {
+            unsigned char c = (unsigned char)row->chars[i];
+            int char_len = 1;
+            if ((c & 0xE0) == 0xC0) char_len = 2;
+            else if ((c & 0xF0) == 0xE0) char_len = 3;
+            else if ((c & 0xF8) == 0xF0) char_len = 4;
+            if (i + char_len > (int)row->len) char_len = (int)row->len - i;
+            rx += 1;
+            i += char_len;
+        }
+    }
+    return rx;
+}
+
+int buffer_rx_to_cx(const erow *row, int rx) {
+    if (!row) return 0;
+    int cur_rx = 0;
+    int cx = 0;
+    while (cx < (int)row->len) {
+        if (row->chars[cx] == '\t') {
+            int tab_w = 4 - (cur_rx % 4);
+            if (cur_rx + tab_w > rx) return cx;
+            cur_rx += tab_w;
+            cx++;
+        } else {
+            if (cur_rx >= rx) return cx;
+            unsigned char c = (unsigned char)row->chars[cx];
+            int char_len = 1;
+            if ((c & 0xE0) == 0xC0) char_len = 2;
+            else if ((c & 0xF0) == 0xE0) char_len = 3;
+            else if ((c & 0xF8) == 0xF0) char_len = 4;
+            if (cx + char_len > (int)row->len) char_len = (int)row->len - cx;
+            cur_rx += 1;
+            cx += char_len;
+        }
+    }
+    return cx;
+}
+
+void buffer_insert_utf8(Buffer *b, int row, int *col, const char *utf8, int len) {
+    if (len <= 0 || !utf8) return;
     if (b->numrows == 0) {
         buffer_insert_row(b, 0, "", 0);
     }
-    if (row >= b->numrows) {
-        row = b->numrows - 1;
-    }
-    erow *r = &b->rows[row];
-    if (col < 0 || col > (int)r->len) {
-        col = (int)r->len;
-    }
-    r->chars = realloc(r->chars, r->len + 2);
-    memmove(&r->chars[col + 1], &r->chars[col], r->len - col + 1);
-    r->len++;
-    r->chars[col] = (char)c;
+    int r = row;
+    if (r >= b->numrows) r = b->numrows - 1;
+    erow *cur = &b->rows[r];
+
+    int c = *col;
+    if (c < 0) c = 0;
+    if (c > (int)cur->len) c = (int)cur->len;
+
+    cur->chars = realloc(cur->chars, cur->len + len + 1);
+    memmove(&cur->chars[c + len], &cur->chars[c], cur->len - c + 1);
+    memcpy(&cur->chars[c], utf8, len);
+    cur->len += len;
+    cur->chars[cur->len] = '\0';
+
+    *col = c + len;
     b->dirty++;
+}
+
+void buffer_insert_char(Buffer *b, int row, int col, int c) {
+    char s[2] = { (char)c, '\0' };
+    int c_col = col;
+    buffer_insert_utf8(b, row, &c_col, s, 1);
 }
 
 void buffer_insert_newline(Buffer *b, int *row, int *col) {
@@ -174,10 +252,12 @@ void buffer_delete_char(Buffer *b, int *row, int *col) {
         b->dirty++;
     } else if (c > 0) {
         erow *cur = &b->rows[r];
-        if (c - 1 < (int)cur->len) {
-            memmove(&cur->chars[c - 1], &cur->chars[c], cur->len - c + 1);
-            cur->len--;
-            *col = c - 1;
+        int prev_c = buffer_prev_utf8_char(cur, c);
+        int bytes = c - prev_c;
+        if (bytes > 0 && prev_c < (int)cur->len) {
+            memmove(&cur->chars[prev_c], &cur->chars[c], cur->len - c + 1);
+            cur->len -= bytes;
+            *col = prev_c;
             b->dirty++;
         }
     }

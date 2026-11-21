@@ -178,16 +178,30 @@ void syntax_highlight_line(const Buffer *b, int row_idx, AppendBuffer *ab, int c
 
     /* Render characters to AppendBuffer with colors */
     int current_color = -1;
-    int col_drawn = 0;
+    int cur_rx = 0;
+    int cols_drawn = 0;
+    size_t col = 0;
 
-    for (size_t col = col_offset; col < row->len && col_drawn < max_cols; col++) {
-        int color = hl[col];
-        if (color != current_color) {
-            current_color = color;
-            abuf_appends(ab, get_color_escape(color));
+    while (col < row->len && cols_drawn < max_cols) {
+        unsigned char uc = (unsigned char)row->chars[col];
+        int char_len = 1;
+        if ((uc & 0xE0) == 0xC0) char_len = 2;
+        else if ((uc & 0xF0) == 0xE0) char_len = 3;
+        else if ((uc & 0xF8) == 0xF0) char_len = 4;
+        if (col + char_len > row->len) char_len = (int)row->len - col;
+
+        if (cur_rx >= col_offset) {
+            int color = hl[col];
+            if (color != current_color) {
+                current_color = color;
+                abuf_appends(ab, get_color_escape(color));
+            }
+            abuf_append(ab, &row->chars[col], char_len);
+            cols_drawn += 1;
         }
-        abuf_append(ab, &row->chars[col], 1);
-        col_drawn++;
+
+        cur_rx += 1;
+        col += char_len;
     }
 
     abuf_appends(ab, "\x1b[0m"); /* Reset colors at line end */

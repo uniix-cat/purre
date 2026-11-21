@@ -41,6 +41,7 @@ void editor_cleanup(void);
 void editor_set_status_message(const char *fmt, ...);
 void editor_refresh_screen(void);
 void editor_process_keypress(int c);
+void editor_process_key_event(int key, const char *utf8, int len);
 void editor_execute_command(const char *cmd);
 
 #endif /* PURR_EDITOR_H */

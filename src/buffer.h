@@ -37,8 +37,14 @@ char *buffer_to_string(const Buffer *b, size_t *buflen);
 void buffer_insert_row(Buffer *b, int at, const char *s, size_t len);
 void buffer_delete_row(Buffer *b, int at);
 void buffer_insert_char(Buffer *b, int row, int col, int c);
+void buffer_insert_utf8(Buffer *b, int row, int *col, const char *utf8, int len);
 void buffer_insert_newline(Buffer *b, int *row, int *col);
 void buffer_delete_char(Buffer *b, int *row, int *col);
+
+int buffer_prev_utf8_char(const erow *row, int col);
+int buffer_next_utf8_char(const erow *row, int col);
+int buffer_cx_to_rx(const erow *row, int cx);
+int buffer_rx_to_cx(const erow *row, int rx);
 
 const char *buffer_detect_filetype(const char *filename);
 

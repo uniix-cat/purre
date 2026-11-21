@@ -11,6 +11,7 @@
 
 static struct termios orig_termios;
 static int raw_mode_enabled = 0;
+static int unread_char = -1;
 
 void abuf_init(AppendBuffer *ab) {
     ab->b = NULL;
@@ -57,7 +58,6 @@ void abuf_free(AppendBuffer *ab) {
 
 void terminal_disable_raw_mode(void) {
     if (raw_mode_enabled) {
-        /* Restore screen and cursor, show cursor */
         write(STDOUT_FILENO, "\x1b[?1049l\x1b[?25h", 14);
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
         raw_mode_enabled = 0;
@@ -66,7 +66,6 @@ void terminal_disable_raw_mode(void) {
 
 int terminal_enable_raw_mode(void) {
     if (!isatty(STDIN_FILENO)) {
-        /* Headless / pipe mode (e.g. for automated testing) */
         raw_mode_enabled = 0;
         return 0;
     }
@@ -78,35 +77,26 @@ int terminal_enable_raw_mode(void) {
     atexit(terminal_disable_raw_mode);
 
     struct termios raw = orig_termios;
-    /* Disable flow control (XON/XOFF) to allow Ctrl+S and Ctrl+Q */
     raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-    /* Disable output processing */
     raw.c_oflag &= ~(OPOST);
-    /* Set 8-bit chars */
     raw.c_cflag |= (CS8);
-    /* Disable echo, canonical mode, extended input, signal chars */
     raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
 
-    /* Read with minimal timeout */
     raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 1; /* 100ms timeout for non-blocking read in raw mode */
+    raw.c_cc[VTIME] = 1;
 
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
         return -1;
     }
 
     raw_mode_enabled = 1;
-
-    /* Switch to alternate screen buffer, clear screen, enable mouse tracking */
     write(STDOUT_FILENO, "\x1b[?1049h\x1b[2J\x1b[H", 14);
-
     return 0;
 }
 
 int terminal_get_window_size(int *rows, int *cols) {
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-        /* Fallback: query cursor position */
         if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B\x1b[6n", 16) != 16) return -1;
         
         char buf[32];
@@ -126,32 +116,31 @@ int terminal_get_window_size(int *rows, int *cols) {
     return 0;
 }
 
-static int unread_char = -1;
-
-int terminal_read_key(int fd) {
-    if (unread_char != -1) {
-        int k = unread_char;
-        unread_char = -1;
-        return k;
-    }
+int terminal_read_key_utf8(int fd, char *utf8_out, int *utf8_len) {
+    utf8_out[0] = '\0';
+    *utf8_len = 0;
 
     char c;
-    ssize_t nread = read(fd, &c, 1);
-    if (nread == 0) {
-        if (!isatty(fd)) return CTRL_KEY('q'); /* EOF on piped input triggers exit */
-        return KEY_NONE;
-    }
-    if (nread < 0) {
-        if (errno == EAGAIN || errno == EINTR) return KEY_NONE;
-        return KEY_NONE;
+    if (unread_char != -1) {
+        c = (char)unread_char;
+        unread_char = -1;
+    } else {
+        ssize_t nread = read(fd, &c, 1);
+        if (nread == 0) {
+            if (!isatty(fd)) return CTRL_KEY('q');
+            return KEY_NONE;
+        }
+        if (nread < 0) {
+            if (errno == EAGAIN || errno == EINTR) return KEY_NONE;
+            return KEY_NONE;
+        }
     }
 
+    /* Escape sequence handling */
     if (c == '\x1b') {
         char seq[5];
-        /* Check if more characters follow immediately using poll */
         struct pollfd pfd = { .fd = fd, .events = POLLIN };
-        if (poll(&pfd, 1, 25) <= 0) {
-            /* Standalone ESC pressed */
+        if (poll(&pfd, 1, 30) <= 0) {
             return KEY_ESC;
         }
 
@@ -196,9 +185,74 @@ int terminal_read_key(int fd) {
         return KEY_ESC;
     }
 
-    /* Convert standard newline representations */
-    if (c == '\n') return KEY_ENTER;
+    /* Backspace and Enter */
+    if (c == '\n' || c == '\r') return KEY_ENTER;
     if (c == 8 || c == 127) return KEY_BACKSPACE;
 
-    return (unsigned char)c;
+    /* Control keys (Ctrl+A..Z) */
+    if ((unsigned char)c < 32 && c != '\t') {
+        return (unsigned char)c;
+    }
+
+    /* Single-byte ASCII */
+    unsigned char uc = (unsigned char)c;
+    if (uc < 0x80) {
+        utf8_out[0] = c;
+        utf8_out[1] = '\0';
+        *utf8_len = 1;
+        return KEY_CHAR;
+    }
+
+    /* Multi-byte UTF-8 sequence (Cyrillic, CJK, Emojis, etc.) */
+    int need_bytes = 0;
+    if ((uc & 0xE0) == 0xC0) {
+        need_bytes = 1; /* 2-byte sequence (Russian Cyrillic is here!) */
+    } else if ((uc & 0xF0) == 0xE0) {
+        need_bytes = 2; /* 3-byte sequence */
+    } else if ((uc & 0xF8) == 0xF0) {
+        need_bytes = 3; /* 4-byte sequence */
+    }
+
+    utf8_out[0] = c;
+    int bytes_read = 1;
+    for (int i = 0; i < need_bytes; i++) {
+        char next_b;
+        if (read(fd, &next_b, 1) == 1) {
+            utf8_out[bytes_read++] = next_b;
+        } else {
+            break;
+        }
+    }
+    utf8_out[bytes_read] = '\0';
+    *utf8_len = bytes_read;
+    return KEY_CHAR;
+}
+
+int utf8_visible_width(const char *s) {
+    if (!s) return 0;
+    int width = 0;
+    size_t i = 0;
+    size_t len = strlen(s);
+
+    while (i < len) {
+        /* Skip ANSI escape codes like \x1b[38;2;...m */
+        if (s[i] == '\x1b' && i + 1 < len && s[i + 1] == '[') {
+            i += 2;
+            while (i < len && s[i] != 'm') i++;
+            if (i < len && s[i] == 'm') i++;
+            continue;
+        }
+
+        unsigned char c = (unsigned char)s[i];
+        int char_len = 1;
+        if ((c & 0xE0) == 0xC0) char_len = 2;
+        else if ((c & 0xF0) == 0xE0) char_len = 3;
+        else if ((c & 0xF8) == 0xF0) char_len = 4;
+
+        if (i + char_len > len) char_len = len - i;
+
+        width += 1;
+        i += char_len;
+    }
+    return width;
 }

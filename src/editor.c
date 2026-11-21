@@ -71,7 +71,10 @@ static int editor_gutter_width(void) {
 }
 
 static void editor_scroll(void) {
-    int text_cols = E.screen_cols - editor_gutter_width();
+    erow *row = (E.cy >= 0 && E.cy < E.buffer.numrows) ? &E.buffer.rows[E.cy] : NULL;
+    int rx = buffer_cx_to_rx(row, E.cx);
+    int gw = editor_gutter_width();
+    int text_cols = E.screen_cols - gw;
     if (text_cols < 1) text_cols = 1;
 
     if (E.cy < E.row_offset) {
@@ -81,11 +84,11 @@ static void editor_scroll(void) {
         E.row_offset = E.cy - E.screen_rows + 1;
     }
 
-    if (E.cx < E.col_offset) {
-        E.col_offset = E.cx;
+    if (rx < E.col_offset) {
+        E.col_offset = rx;
     }
-    if (E.cx >= E.col_offset + text_cols) {
-        E.col_offset = E.cx - text_cols + 1;
+    if (rx >= E.col_offset + text_cols) {
+        E.col_offset = rx - text_cols + 1;
     }
 }
 
@@ -97,25 +100,25 @@ static void editor_draw_rows(AppendBuffer *ab) {
     for (int y = 0; y < E.screen_rows; y++) {
         int filerow = y + E.row_offset;
         if (filerow >= E.buffer.numrows) {
-            /* Tildes for empty lines */
-            abuf_printf(ab, "\x1b[38;2;98;114;164m       │ ~\x1b[0m");
+            /* Tildes for empty lines: 6 spaces + '│' + 1 space = exactly 8 cols */
+            abuf_printf(ab, "\x1b[38;2;98;114;164m      │ ~\x1b[0m");
         } else {
-            /* Check for diagnostic icon in gutter */
+            /* Check for diagnostic icon in gutter: exactly 8 display columns */
             const Diagnostic *d = buffer_get_line_diagnostic(&E.buffer, filerow);
             if (d) {
                 if (d->severity == 1) {
-                    /* Red Error icon 󰅚 */
-                    abuf_printf(ab, "\x1b[38;2;255;85;85m 󰅚 %3d \x1b[38;2;98;114;164m│\x1b[0m ", (filerow + 1) % 1000);
+                    /* Red Error icon 󰅚: 1 cell icon + 4 cell num + 1 space + 1 cell '│' + 1 space = 8 cells */
+                    abuf_printf(ab, "\x1b[38;2;255;85;85m󰅚%4d\x1b[38;2;98;114;164m │\x1b[0m ", (filerow + 1) % 10000);
                 } else if (d->severity == 2) {
                     /* Yellow Warning icon 󰀪 */
-                    abuf_printf(ab, "\x1b[38;2;241;250;140m 󰀪 %3d \x1b[38;2;98;114;164m│\x1b[0m ", (filerow + 1) % 1000);
+                    abuf_printf(ab, "\x1b[38;2;241;250;140m󰀪%4d\x1b[38;2;98;114;164m │\x1b[0m ", (filerow + 1) % 10000);
                 } else {
                     /* Cyan Info icon 󰋽 */
-                    abuf_printf(ab, "\x1b[38;2;139;233;253m 󰋽 %3d \x1b[38;2;98;114;164m│\x1b[0m ", (filerow + 1) % 1000);
+                    abuf_printf(ab, "\x1b[38;2;139;233;253m󰋽%4d\x1b[38;2;98;114;164m │\x1b[0m ", (filerow + 1) % 10000);
                 }
             } else {
-                /* Dim line number */
-                abuf_printf(ab, "\x1b[38;2;98;114;164m   %3d │\x1b[0m ", (filerow + 1) % 1000);
+                /* Dim line number: 1 space + 4 digits + 1 space + '│' + 1 space = exactly 8 display cells */
+                abuf_printf(ab, "\x1b[38;2;98;114;164m %4d │\x1b[0m ", (filerow + 1) % 10000);
             }
 
             /* Syntax highlighting for text */
@@ -152,31 +155,30 @@ static void editor_draw_status_bar(AppendBuffer *ab) {
         snprintf(diag_badge, sizeof(diag_badge), "󰄬 clean | ");
     }
 
-    char lstatus[128], rstatus[128];
-    int len = snprintf(lstatus, sizeof(lstatus), " [ %s ] %s%s%s ",
-                       mode_str,
-                       ficon,
-                       E.buffer.filename ? E.buffer.filename : "[No Name]",
-                       E.buffer.dirty ? "  [+]" : "");
+    char lstatus[256], rstatus[256];
+    snprintf(lstatus, sizeof(lstatus), " [ %s ] %s%s%s ",
+             mode_str,
+             ficon,
+             E.buffer.filename ? E.buffer.filename : "[No Name]",
+             E.buffer.dirty ? "  [+]" : "");
 
-    int rlen = snprintf(rstatus, sizeof(rstatus), " %s%s | %s | Ln %d, Col %d ",
-                        diag_badge,
-                        E.lsp_status,
-                        E.buffer.filetype ? E.buffer.filetype : "text",
-                        E.cy + 1, E.cx + 1);
+    snprintf(rstatus, sizeof(rstatus), " %s%s | %s | Ln %d, Col %d ",
+             diag_badge,
+             E.lsp_status,
+             E.buffer.filetype ? E.buffer.filetype : "text",
+             E.cy + 1, E.cx + 1);
 
-    if (len > E.screen_cols) len = E.screen_cols;
-    abuf_append(ab, lstatus, len);
+    /* Calculate VISIBLE column widths (ignoring ANSI and accounting for UTF-8) */
+    int lvis = utf8_visible_width(lstatus);
+    int rvis = utf8_visible_width(rstatus);
+    int pad = E.screen_cols - lvis - rvis;
+    if (pad < 1) pad = 1;
 
-    while (len < E.screen_cols) {
-        if (E.screen_cols - len == rlen) {
-            abuf_append(ab, rstatus, rlen);
-            break;
-        } else {
-            abuf_appends(ab, " ");
-            len++;
-        }
+    abuf_appends(ab, lstatus);
+    for (int i = 0; i < pad; i++) {
+        abuf_appends(ab, " ");
     }
+    abuf_appends(ab, rstatus);
     abuf_appends(ab, "\x1b[0m\r\n");
 }
 
@@ -220,12 +222,14 @@ void editor_refresh_screen(void) {
     editor_draw_status_bar(&ab);
     editor_draw_message_bar(&ab);
 
-    /* Position cursor */
+    /* Position cursor with visual render column (rx) */
     if (E.mode == MODE_COMMAND) {
         abuf_printf(&ab, "\x1b[%d;%dH", E.screen_rows + 2, E.command_len + 2);
     } else {
+        erow *row = (E.cy >= 0 && E.cy < E.buffer.numrows) ? &E.buffer.rows[E.cy] : NULL;
+        int rx = buffer_cx_to_rx(row, E.cx);
         int cursor_y = (E.cy - E.row_offset) + 1;
-        int cursor_x = (E.cx - E.col_offset) + 1 + editor_gutter_width();
+        int cursor_x = (rx - E.col_offset) + 1 + editor_gutter_width();
         abuf_printf(&ab, "\x1b[%d;%dH", cursor_y, cursor_x);
     }
 
@@ -309,11 +313,11 @@ static void editor_move_cursor(int key) {
     switch (key) {
         case 'j':
         case KEY_ARROW_LEFT:
-            if (E.cx > 0) E.cx--;
+            E.cx = buffer_prev_utf8_char(row, E.cx);
             break;
         case ';':
         case KEY_ARROW_RIGHT:
-            if (E.cx < rowlen) E.cx++;
+            E.cx = buffer_next_utf8_char(row, E.cx);
             break;
         case 'l':
         case KEY_ARROW_UP:
@@ -332,11 +336,11 @@ static void editor_move_cursor(int key) {
     }
 }
 
-void editor_process_keypress(int c) {
-    if (c == KEY_NONE) return;
+void editor_process_key_event(int key, const char *utf8, int len) {
+    if (key == KEY_NONE) return;
 
     /* Hybrid global shortcuts (work in ALL modes) */
-    if (c == CTRL_KEY('s')) {
+    if (key == CTRL_KEY('s') || key == KEY_CTRL_S) {
         if (buffer_save(&E.buffer, NULL) == 0) {
             editor_set_status_message("File saved: %s", E.buffer.filename);
             lua_bridge_on_file_saved(E.buffer.filename);
@@ -346,7 +350,7 @@ void editor_process_keypress(int c) {
         return;
     }
 
-    if (c == CTRL_KEY('q')) {
+    if (key == CTRL_KEY('q') || key == KEY_CTRL_Q) {
         if (E.buffer.dirty) {
             editor_set_status_message("Warning: Unsaved changes! Press :q! to force quit");
             return;
@@ -357,26 +361,28 @@ void editor_process_keypress(int c) {
 
     /* COMMAND MODE */
     if (E.mode == MODE_COMMAND) {
-        if (c == KEY_ESC) {
+        if (key == KEY_ESC || key == CTRL_KEY('c') || key == KEY_CTRL_C) {
             E.mode = MODE_NORMAL;
             E.command_len = 0;
             E.command_buf[0] = '\0';
-        } else if (c == KEY_ENTER) {
+        } else if (key == KEY_ENTER) {
             E.command_buf[E.command_len] = '\0';
             E.mode = MODE_NORMAL;
             editor_execute_command(E.command_buf);
             E.command_len = 0;
             E.command_buf[0] = '\0';
-        } else if (c == KEY_BACKSPACE || c == KEY_DEL) {
+        } else if (key == KEY_BACKSPACE || key == KEY_DEL) {
             if (E.command_len > 0) {
-                E.command_len--;
+                int prev = buffer_prev_utf8_char(&(erow){.chars = E.command_buf, .len = E.command_len}, E.command_len);
+                E.command_len = prev;
                 E.command_buf[E.command_len] = '\0';
             } else {
                 E.mode = MODE_NORMAL;
             }
-        } else if (isprint(c)) {
-            if (E.command_len < (int)sizeof(E.command_buf) - 1) {
-                E.command_buf[E.command_len++] = (char)c;
+        } else if (key == KEY_CHAR && len > 0) {
+            if (E.command_len + len < (int)sizeof(E.command_buf) - 1) {
+                memcpy(&E.command_buf[E.command_len], utf8, len);
+                E.command_len += len;
                 E.command_buf[E.command_len] = '\0';
             }
         }
@@ -385,37 +391,43 @@ void editor_process_keypress(int c) {
 
     /* INSERT MODE */
     if (E.mode == MODE_INSERT) {
-        if (c == KEY_ESC) {
+        if (key == KEY_ESC || key == CTRL_KEY('c') || key == KEY_CTRL_C) {
             E.mode = MODE_NORMAL;
-        } else if (c == KEY_ENTER) {
+        } else if (key == KEY_ENTER) {
             buffer_insert_newline(&E.buffer, &E.cy, &E.cx);
-        } else if (c == KEY_BACKSPACE) {
+        } else if (key == KEY_BACKSPACE) {
             buffer_delete_char(&E.buffer, &E.cy, &E.cx);
-        } else if (c == KEY_DEL) {
+        } else if (key == KEY_DEL) {
             if (E.cy < E.buffer.numrows) {
-                int r = E.cy, col = E.cx + 1;
-                if (col <= (int)E.buffer.rows[r].len) {
-                    buffer_delete_char(&E.buffer, &r, &col);
+                erow *r = &E.buffer.rows[E.cy];
+                int next_col = buffer_next_utf8_char(r, E.cx);
+                if (next_col > E.cx) {
+                    int bytes = next_col - E.cx;
+                    memmove(&r->chars[E.cx], &r->chars[next_col], r->len - next_col + 1);
+                    r->len -= bytes;
+                    E.buffer.dirty++;
                 }
             }
-        } else if (c == KEY_ARROW_LEFT || c == KEY_ARROW_RIGHT ||
-                   c == KEY_ARROW_UP || c == KEY_ARROW_DOWN) {
-            editor_move_cursor(c);
-        } else if (isprint(c) || c == '\t') {
-            if (c == '\t') {
-                for (int i = 0; i < 4; i++) {
-                    buffer_insert_char(&E.buffer, E.cy, E.cx++, ' ');
-                }
-            } else {
-                buffer_insert_char(&E.buffer, E.cy, E.cx++, c);
-            }
+        } else if (key == KEY_ARROW_LEFT || key == KEY_ARROW_RIGHT ||
+                   key == KEY_ARROW_UP || key == KEY_ARROW_DOWN) {
+            editor_move_cursor(key);
+        } else if (key == '\t') {
+            buffer_insert_utf8(&E.buffer, E.cy, &E.cx, "    ", 4);
+        } else if (key == KEY_CHAR && len > 0) {
+            buffer_insert_utf8(&E.buffer, E.cy, &E.cx, utf8, len);
         }
         return;
     }
 
     /* NORMAL MODE */
+    if (key == CTRL_KEY('c') || key == KEY_CTRL_C) {
+        E.pending_delete = 0;
+        editor_set_status_message("Type :q to quit");
+        return;
+    }
+
     if (E.pending_delete) {
-        if (c == 'd') {
+        if (key == KEY_CHAR && utf8[0] == 'd') {
             /* 'dd' deletes current line */
             if (E.buffer.numrows > 0) {
                 buffer_delete_row(&E.buffer, E.cy);
@@ -426,6 +438,8 @@ void editor_process_keypress(int c) {
         E.pending_delete = 0;
         return;
     }
+
+    int c = (key == KEY_CHAR && len == 1) ? (unsigned char)utf8[0] : key;
 
     switch (c) {
         case ':':
@@ -448,9 +462,15 @@ void editor_process_keypress(int c) {
             E.mode = MODE_INSERT;
             break;
         case 'x':
-            if (E.cy < E.buffer.numrows && E.cx < (int)E.buffer.rows[E.cy].len) {
-                int r = E.cy, col = E.cx + 1;
-                buffer_delete_char(&E.buffer, &r, &col);
+            if (E.cy < E.buffer.numrows) {
+                erow *r = &E.buffer.rows[E.cy];
+                int next_col = buffer_next_utf8_char(r, E.cx);
+                if (next_col > E.cx) {
+                    int bytes = next_col - E.cx;
+                    memmove(&r->chars[E.cx], &r->chars[next_col], r->len - next_col + 1);
+                    r->len -= bytes;
+                    E.buffer.dirty++;
+                }
             }
             break;
         case 'd':
@@ -512,7 +532,6 @@ void editor_process_keypress(int c) {
             editor_move_cursor(c);
             break;
         case 'K':
-            /* Quick LSP hover documentation */
             lua_bridge_execute_command("lsp", "hover");
             break;
         case KEY_PAGE_UP:
@@ -530,4 +549,9 @@ void editor_process_keypress(int c) {
             if (E.cy < E.buffer.numrows) E.cx = (int)E.buffer.rows[E.cy].len;
             break;
     }
+}
+
+void editor_process_keypress(int c) {
+    char utf8[8] = { (char)c, '\0' };
+    editor_process_key_event(c, utf8, (c > 0 && c < 128) ? 1 : 0);
 }

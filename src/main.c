@@ -35,9 +35,11 @@ int main(int argc, char *argv[]) {
         /* Poll terminal input and background LSP server pipes */
         int ready = async_poll_events(STDIN_FILENO, 50);
         if (ready > 0) {
-            int c = terminal_read_key(STDIN_FILENO);
-            if (c != KEY_NONE) {
-                editor_process_keypress(c);
+            char utf8[16];
+            int len = 0;
+            int key = terminal_read_key_utf8(STDIN_FILENO, utf8, &len);
+            if (key != KEY_NONE) {
+                editor_process_key_event(key, utf8, len);
             }
         }
     }

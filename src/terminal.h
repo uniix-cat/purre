@@ -6,8 +6,16 @@
 
 enum EditorKey {
     KEY_NONE = 0,
+    KEY_CHAR = 1,
     KEY_BACKSPACE = 127,
-    KEY_ARROW_LEFT = 1000,
+    KEY_ESC = 27,
+    KEY_ENTER = '\r',
+    KEY_CTRL_C = 3,
+    KEY_CTRL_S = 19,
+    KEY_CTRL_Q = 17,
+    
+    /* Special keys placed well above Unicode plane 1 */
+    KEY_ARROW_LEFT = 200000,
     KEY_ARROW_RIGHT,
     KEY_ARROW_UP,
     KEY_ARROW_DOWN,
@@ -15,9 +23,7 @@ enum EditorKey {
     KEY_HOME,
     KEY_END,
     KEY_PAGE_UP,
-    KEY_PAGE_DOWN,
-    KEY_ESC = 27,
-    KEY_ENTER = '\r'
+    KEY_PAGE_DOWN
 };
 
 #define CTRL_KEY(k) ((k) & 0x1f)
@@ -38,6 +44,12 @@ void abuf_free(AppendBuffer *ab);
 int terminal_enable_raw_mode(void);
 void terminal_disable_raw_mode(void);
 int terminal_get_window_size(int *rows, int *cols);
-int terminal_read_key(int fd);
+
+/* Reads a key event. For normal characters (including multi-byte UTF-8 like Russian),
+ * fills utf8_out (null-terminated) and returns KEY_CHAR.
+ * For special keys, returns enum EditorKey. */
+int terminal_read_key_utf8(int fd, char *utf8_out, int *utf8_len);
+
+int utf8_visible_width(const char *s);
 
 #endif /* PURR_TERMINAL_H */
