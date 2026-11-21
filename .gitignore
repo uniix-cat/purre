@@ -2,8 +2,10 @@
 purr
 src/*.o
 *.o
+a.out
 
-# Editor temporary files
+# Temporary and editor files
 *.swp
 *.swo
 *~
+*.log

@@ -1,104 +1,160 @@
 # Purr 🐾
 
-> Легковесный, модальный терминальный текстовый редактор на Си с встроенным LSP, умным автодополнением по Tab, подсветкой синтаксиса и расширяемостью через Lua — готовый к работе сразу «из коробки».
+> Lightweight, modern modal terminal text editor written in clean C (<2500 lines) with built-in LSP, hybrid Tab autocomplete, static analysis, syntax highlighting, and LuaJIT extensibility — ready out of the box with zero configuration.
+
+[English](README.md) | [Русский](README_RU.md) | [Lua Plugins](docs/PLUGINS.md)
 
 ---
 
-## 🎯 Философия Purr
+## 🎯 Why Purr?
 
-В отличие от современных дистрибутивов Neovim, требующих установки сотен плагинов (`lazy`, `mason`, `nvim-lspconfig`, `cmp`), которые регулярно ломаются при обновлениях:
+Modern text editing often feels polarized:
+- **Neovim distributions** (`LazyVim`, `LunarVim`, `AstroNvim`) require dozens of fragile plugins, complex Lua package managers (`lazy.nvim`, `mason.nvim`), and gigabytes of dependencies that break on routine updates.
+- **Micro and Nano** are simple, but lack built-in LSP intelligence, semantic autocompletion, and real-time compiler diagnostics.
 
-* **Готов к работе сразу**: LSP, статический анализ (`clang-tidy`), автодополнение по `Tab`, авто-скобки и подсветка синтаксиса встроены и работают сразу.
-* **Компактная кодовая база**: всего **~2200 строк** чистого, модульного Си и **55 КБ** бинарник!
-* **Асинхронный I/O**: JSON-RPC протокол языковых серверов работает в неблокирующем цикле (`poll`) через pipes, не подвешивая терминал.
-* **Эргономичный модал на домашнем ряде**:
-  - Устаревший `hjkl` заменён на естественный **`jkl;`** (пальцы лежат прямо на домашнем ряде клавиатуры, без смещения руки влево).
-  - Вход в режим вставки осуществляется по клавише **`a`** прямо в позиции курсора.
-  - Универсальные шорткаты спасения: `Ctrl+S` (сохранить), `Ctrl+Q` (выйти) и `Ctrl+C` (возврат в Normal Mode).
-* **Nerd Fonts из коробки**: Гаттер с номерами строк и цветными иконками ошибок `󰅚` и предупреждений `󰀪`, индикаторы статуса и языков.
-* **Полноценная поддержка UTF-8**: Идеальная работа с русским языком, без рассинхрона курсора и кракозябр.
-* **Умное автодополнение (Tab Completion)**: Всплывающее меню вариантов от языкового сервера прямо под курсором с типами (`󰊕 function`, `󰆧 variable`, `󰌋 keyword`).
-* **Авто-скобки и отступы**: Автоматическое закрытие `()`, `[]`, `{}`, `""`, `''`, умный перескок, авто-удаление пары на Backspace и авто-отступы на Enter.
+**Purr bridges this gap.** It delivers the full power of a modern IDE in a lightning-fast, self-contained terminal binary with zero setup.
+
+### Key Highlights
+
+* **Zero-Config LSP**: Automatic language server discovery for ~30 programming languages (`clangd`, `pyright`, `rust-analyzer`, `gopls`, `zls`, etc.). No plugin managers or manual config files needed.
+* **Compact & Ultra-Fast**: Under **2,500 lines** of modular C99 and a **~55 KB** binary. Blazing fast startup (< 2 milliseconds).
+* **Non-blocking Asynchronous I/O**: Language servers and linters run asynchronously via subprocess pipes without freezing the terminal UI.
+* **Ergonomic Home-Row Navigation (`jkl;`)**:
+  - The obsolete `hjkl` layout from 1970s Lear Siegler terminals is replaced by **`jkl;`** (`j`: left, `k`: down, `l`: up, `;`: right). Your fingers stay naturally centered on the home row without shifting left.
+  - Insert mode toggle is **`a`** directly at the cursor position.
+  - Fail-safe universal hotkeys: `Ctrl+S` (save), `Ctrl+Q` (quit), `Ctrl+C` (escape to Normal Mode).
+* **Hybrid Tab Autocomplete**:
+  - Semantic completion from running LSP servers.
+  - Instant automatic fallback to buffer word scanning and language keywords if an LSP is absent.
+  - Cycle candidates with `Tab` or `↓`/`Ctrl+N`, cycle back with `↑`/`Ctrl+P`, confirm with `Enter`.
+* **Built-in Static Analysis**: Real-time linting with `clang-tidy`, `cppcheck`, `shellcheck`, and `ruff`.
+* **Nerd Fonts Out of the Box**: Status bar cat badge (`󰄛`), filetype icons (``, ``, ``), and gutter diagnostic marks (`󰅚` error, `󰀪` warning, `󰋽` info).
+* **Smart Auto-Pairs & Indentation**:
+  - Auto-closing pairs: `()`, `[]`, `{}`, `""`, `''`.
+  - Smart overtyping (skips duplicate closing characters).
+  - Pair deletion on Backspace.
+  - Smart auto-indent on `Enter` and auto-unindent when typing `}`.
+* **Full UTF-8 & Cyrillic Support**: Native multi-byte UTF-8 handling. Russian text edits seamlessly without cursor displacement.
+* **LuaJIT Scripting**: Embedded LuaJIT allows writing custom commands, hooks, and extensions with near-native performance ([Lua Plugin Guide](docs/PLUGINS.md)).
 
 ---
 
-## 🚀 Быстрый старт
+## 🚀 Quick Start
 
-### Сборка и запуск
+### Prerequisites
+- C compiler (`gcc` or `clang`)
+- `make`
+- `luajit` (`libluajit-5.1-dev` on Debian/Ubuntu, `luajit` on Arch Linux)
+- `tree-sitter` library
+- A [Nerd Font](https://www.nerdfonts.com/) enabled terminal (e.g. JetBrains Mono Nerd Font, FiraCode Nerd Font, Alacritty, Kitty, WezTerm).
+
+### Build & Run
 
 ```bash
-# Сборка (требуются luajit, tree-sitter, gcc/clang)
+# Clone the repository
+git clone https://github.com/Fred-Lght/purr.git
+cd purr
+
+# Compile (takes < 2 seconds)
 make
 
-# Запуск редактора
-./purr [путь_к_файлу]
+# Launch Purr
+./purr [filename]
 ```
 
 ---
 
-## ⌨️ Управление (Горячие клавиши)
+## ⌨️ Keybindings Reference
 
-### Универсальные (работают в любых режимах)
-- `Ctrl + S`: Моментальное сохранение буфера.
-- `Ctrl + Q`: Безопасный выход из редактора (предупреждает о несохраненных изменениях).
-- `Ctrl + C` или `Esc`: Возврат в Normal Mode из любого режима или закрытие меню автодополнения.
+### Universal (Work in ALL modes)
+| Shortcut | Action |
+| :--- | :--- |
+| `Ctrl + S` | Save file immediately |
+| `Ctrl + Q` | Quit Purr (prompts if there are unsaved changes) |
+| `Ctrl + C` / `Esc` | Return to **Normal Mode** / Close completion popup |
 
-### Normal Mode (Командный режим по умолчанию)
-- `j`: Курсор **влево** (указательный палец)
-- `k`: Курсор **вниз** (средний палец)
-- `l`: Курсор **вверх** (безымянный палец)
-- `;`: Курсор **вправо** (мизинец)
-- `a`: Переход в **Insert Mode** (режим вставки) прямо на позиции курсора.
-- `w` / `b`: Переход на слово вперед / назад.
-- `0` / `$`: В начало / в конец строки.
-- `g` / `G`: В начало / в самый конец файла.
-- `o` / `O`: Вставить новую строку снизу / сверху и перейти в режим вставки.
-- `x`: Удалить символ под курсором.
-- `d d`: Удалить текущую строку.
-- `K`: Показать документацию/тип символа под курсором (LSP Hover).
-- `:`: Открыть командную строку редактора.
+### Normal Mode (Default)
+| Key | Action |
+| :--- | :--- |
+| **`j`** | Move cursor **left** (index finger) |
+| **`k`** | Move cursor **down** (middle finger) |
+| **`l`** | Move cursor **up** (ring finger) |
+| **`;`** | Move cursor **right** (pinky finger) |
+| **`a`** | Enter **Insert Mode** at cursor |
+| `w` / `b` | Move word forward / backward |
+| `0` / `$` | Move to beginning / end of line |
+| `g` / `G` | Jump to top / bottom of buffer |
+| `o` / `O` | Insert newline below / above and switch to Insert Mode |
+| `x` | Delete character under cursor |
+| `d d` | Delete current line |
+| `K` | LSP Hover (show documentation and types under cursor) |
+| `:` | Open Command Mode |
 
-### Insert Mode (Режим вставки текста)
-- **Ввод текста**: полная поддержка русского, английского и символов.
-- **Tab**:
-  - Если курсор после слова/символа (`foo.` или `pri`) — вызывает всплывающее меню **LSP-автодополнения**. Повторное нажатие `Tab` циклически листает варианты.
-  - Если на пустом месте — вставляет отступ в 4 пробела.
-- **Enter**:
-  - Если открыто меню автодополнения — вставляет выбранный вариант.
-  - В обычном режиме — перенос строки с **умным сохранением отступов** (если предыдущая строка заканчивалась на `{`, `:`, `(`, `[`, автоматически добавляются 4 пробела).
-- **Авто-пары**: Ввод `(`, `[`, `{`, `"`, `'` автоматически создает пару и ставит курсор в середину. Повторный ввод закрывающего символа перешагивает его без дублирования.
-- **Умное удаление**: Backspace между пустой парой скобок `()` удаляет сразу обе скобки.
-- **Умный де-отступ**: Ввод `}` на строке с отступом автоматически сдвигает её на 4 пробела влево для выравнивания с открывающим блоком.
-- `Esc` или `Ctrl + C`: Возврат в Normal Mode.
+### Insert Mode
+| Key | Action |
+| :--- | :--- |
+| `Tab` | Trigger autocomplete / Cycle through completion items |
+| `↓` / `Ctrl + N` | Select next completion candidate |
+| `↑` / `Ctrl + P` | Select previous completion candidate |
+| `Enter` | Accept selected completion / Insert smart newline with indentation |
+| `Backspace` | Delete character (deletes both characters if between empty pair like `()`) |
+| `Esc` / `Ctrl + C` | Close autocomplete or return to Normal Mode |
 
-### Command Mode (Командная строка `:`)
-- `:w [имя_файла]` — Сохранить файл.
-- `:q` — Выйти (с проверкой изменений).
-- `:q!` — Принудительно выйти без сохранения.
-- `:wq` — Сохранить и выйти.
-- `:e <файл>` — Открыть файл в текущем буфере.
-- `:check` / `:analyze` — Запустить статический анализ (`clang-tidy`, `shellcheck`, `ruff`).
-- `:lsp [start|status|hover|def|stop|list|set <lang> <cmd>]` — Управление LSP.
-  - `:lsp hover` (или клавиша `K`) — документация к символу под курсором.
-  - `:lsp def` — переход к определению (Go To Definition).
-  - `:lsp set <язык> <команда>` — привязать любой кастомный сервер на лету.
-- `:lua <код>` — Выполнить произвольный Lua-код прямо в редакторе!
-- `:help` — Вывести краткую справку по горячим клавишам.
+### Command Mode (`:`)
+| Command | Action |
+| :--- | :--- |
+| `:w [filename]` | Save buffer |
+| `:q` | Quit |
+| `:q!` | Force quit without saving |
+| `:wq` | Save and quit |
+| `:e <path>` | Open file in buffer |
+| `:check` | Run static analyzer on current file (`clang-tidy`, `ruff`, etc.) |
+| `:lsp start` | Start language server for current filetype |
+| `:lsp status` | Display active LSP server status |
+| `:lsp hover` | Show symbol documentation (same as `K` key) |
+| `:lsp def` | Go to definition under cursor |
+| `:lsp list` | List supported LSP languages |
+| `:lsp set <lang> <cmd>` | Register or override a custom LSP command on the fly |
+| `:lua <code>` | Evaluate Lua code directly inside the editor |
+| `:help` | Show quick cheat sheet in the status bar |
 
 ---
 
-## 🔌 Архитектура универсального LSP и статических анализаторов
+## 🔌 Supported Languages & LSPs
 
-Purr автоматически ищет установленные в системе серверы по приоритету:
+Purr automatically detects and connects to installed servers in your `$PATH`:
 
-| Язык | Поддерживаемые серверы | Анализаторы (по `:check` и на сохранение) |
-| :--- | :--- | :--- |
-| **C / C++** | `clangd`, `ccls` | `clang-tidy`, `cppcheck` |
-| **Python** | `pyright-langserver`, `pylsp`, `ruff` | `ruff`, `flake8` |
-| **Rust** | `rust-analyzer` | `clippy` |
-| **Go** | `gopls` | `golangci-lint` |
-| **TypeScript / JS** | `typescript-language-server`, `vtsls`, `deno` | `eslint` |
-| **Bash / Shell** | `bash-language-server` | `shellcheck` |
-| **Lua** | `lua-language-server` | `luacheck` |
-| **HTML / CSS / JSON**| `vscode-*-language-server` | — |
-| **Zig, Java, C#, PHP, Ruby, Kotlin, Swift, Dart, Markdown, CMake и др.** |
+| Language | Primary LSP | Fallback / Alternatives | Linters & Analyzers |
+| :--- | :--- | :--- | :--- |
+| **C / C++** | `clangd` | `ccls` | `clang-tidy`, `cppcheck` |
+| **Python** | `pyright` | `pyright-langserver`, `pylsp`, `ruff` | `ruff`, `flake8` |
+| **Rust** | `rust-analyzer` | — | `clippy` |
+| **Go** | `gopls` | — | `golangci-lint` |
+| **TypeScript / JS**| `typescript-language-server` | `vtsls`, `deno` | `eslint` |
+| **Lua** | `lua-language-server` | — | `luacheck` |
+| **HTML / CSS / JSON**| `vscode-html-language-server` | `vscode-css-language-server` | — |
+| **Shell** | `bash-language-server` | — | `shellcheck` |
+| **Zig** | `zls` | — | — |
+| **PHP** | `intelephense` | `phpactor` | `phpstan` |
+
+To install an LSP on Arch Linux:
+```bash
+sudo pacman -S clang          # C/C++ (clangd)
+sudo pacman -S pyright        # Python
+sudo pacman -S rust-analyzer  # Rust
+sudo pacman -S gopls          # Go
+```
+
+---
+
+## 🧩 Extending Purr with Lua
+
+Purr embeds LuaJIT 2.1. You can add custom commands, formatters, and status badges in `runtime/init.lua`.
+
+See the full [Lua Plugin Documentation](docs/PLUGINS.md) for API details and code examples.
+
+---
+
+## 📜 License
+
+MIT License. Designed with ❤️ by [Fred-Lght](https://github.com/Fred-Lght).
