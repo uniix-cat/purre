@@ -1,5 +1,6 @@
 -- purr universal LSP client
-local json = dofile("runtime/json.lua")
+local runtime_dir = purr and purr.runtime_dir or "runtime"
+local json = dofile(runtime_dir .. "/json.lua")
 
 local lsp = {
     servers = {},

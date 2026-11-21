@@ -48,7 +48,7 @@
 - Библиотека `tree-sitter`
 - Терминал с поддержкой шрифтов [Nerd Fonts](https://www.nerdfonts.com/) (например, JetBrains Mono Nerd Font, FiraCode Nerd Font, Alacritty, Kitty, WezTerm).
 
-### Сборка и запуск
+### Сборка и установка
 
 ```bash
 # Клонирование репозитория
@@ -58,8 +58,14 @@ cd purr
 # Сборка (занимает меньше 2 секунд)
 make
 
-# Запуск редактора
-./purr [имя_файла]
+# Вариант А: Общесистемная установка в корень (в /usr/local/bin, доступно везде)
+sudo make install
+
+# Вариант Б: Установка только для своего пользователя (в ~/.local/bin, без root/sudo)
+make install PREFIX=$HOME/.local
+
+# Запуск редактора из любой папки системы!
+purr [имя_файла]
 ```
 
 ---

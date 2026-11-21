@@ -1,6 +1,7 @@
 -- purr standard runtime initialization
-local lsp = dofile("runtime/lsp.lua")
-local analyzer = dofile("runtime/analyzer.lua")
+local runtime_dir = purr and purr.runtime_dir or "runtime"
+local lsp = dofile(runtime_dir .. "/lsp.lua")
+local analyzer = dofile(runtime_dir .. "/analyzer.lua")
 
 purr.lsp = lsp
 purr.analyzer = analyzer

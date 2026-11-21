@@ -363,14 +363,39 @@ void lua_bridge_init(void) {
     E.lua_state = L;
 
     /* Search for runtime/init.lua */
+    char user_runtime_path[512] = "";
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(user_runtime_path, sizeof(user_runtime_path), "%s/.local/share/purr/runtime/init.lua", home);
+    }
+
     const char *paths[] = {
         "runtime/init.lua",
+        user_runtime_path[0] ? user_runtime_path : NULL,
+        "/usr/local/share/purr/runtime/init.lua",
         "/usr/share/purr/runtime/init.lua",
         NULL
     };
 
     for (int i = 0; paths[i]; i++) {
+        if (!paths[i] || paths[i][0] == '\0') continue;
         if (access(paths[i], R_OK) == 0) {
+            char dir[512];
+            strncpy(dir, paths[i], sizeof(dir) - 1);
+            dir[sizeof(dir) - 1] = '\0';
+            char *last_slash = strrchr(dir, '/');
+            if (last_slash) {
+                *last_slash = '\0';
+            } else {
+                strcpy(dir, ".");
+            }
+
+            /* Set purr.runtime_dir */
+            lua_getglobal(L, "purr");
+            lua_pushstring(L, dir);
+            lua_setfield(L, -2, "runtime_dir");
+            lua_pop(L, 1);
+
             if (luaL_dofile(L, paths[i]) != 0) {
                 fprintf(stderr, "Error loading %s: %s\n", paths[i], lua_tostring(L, -1));
                 lua_pop(L, 1);

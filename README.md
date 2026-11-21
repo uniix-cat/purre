@@ -48,7 +48,7 @@ Modern text editing often feels polarized:
 - `tree-sitter` library
 - A [Nerd Font](https://www.nerdfonts.com/) enabled terminal (e.g. JetBrains Mono Nerd Font, FiraCode Nerd Font, Alacritty, Kitty, WezTerm).
 
-### Build & Run
+### Build & Install
 
 ```bash
 # Clone the repository
@@ -58,8 +58,14 @@ cd purr
 # Compile (takes < 2 seconds)
 make
 
-# Launch Purr
-./purr [filename]
+# Option A: System-wide install (executable in /usr/local/bin, runs from anywhere)
+sudo make install
+
+# Option B: User-only install (in ~/.local/bin, no sudo required)
+make install PREFIX=$HOME/.local
+
+# Launch Purr from anywhere!
+purr [filename]
 ```
 
 ---
