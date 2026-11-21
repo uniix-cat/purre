@@ -4,7 +4,6 @@ local json = dofile("runtime/json.lua")
 local lsp = {
     servers = {},
     diagnostics = {},
-    -- Broad multi-candidate registry for major languages
     registry = {
         c          = { { cmd = "clangd", args = {"--background-index", "--clang-tidy"} }, { cmd = "ccls", args = {} } },
         cpp        = { { cmd = "clangd", args = {"--background-index", "--clang-tidy"} }, { cmd = "ccls", args = {} } },
@@ -36,13 +35,10 @@ local lsp = {
     }
 }
 
--- Cache detected binaries in system PATH
 local exec_cache = {}
 
 local function command_exists(cmd)
-    if exec_cache[cmd] ~= nil then
-        return exec_cache[cmd]
-    end
+    if exec_cache[cmd] ~= nil then return exec_cache[cmd] end
     local f = io.popen(string.format("command -v %s 2>/dev/null", cmd))
     if f then
         local res = f:read("*l")
@@ -54,7 +50,6 @@ local function command_exists(cmd)
     return false
 end
 
--- Find project root directory by inspecting ancestor folders
 local function find_project_root(file_path)
     local cwd = io.popen("pwd"):read("*l") or ""
     if not file_path or file_path == "" then return cwd end
@@ -136,7 +131,7 @@ function lsp.handle_message(server, msg)
         end
     end
 
-    -- Workspace configuration request (must reply with empty table so servers don't stall)
+    -- Workspace configuration reply
     if msg.id and msg.method == "workspace/configuration" then
         lsp.send_rpc(server, {
             jsonrpc = "2.0",
@@ -175,7 +170,6 @@ function lsp.process_buffer(server)
     end
 end
 
--- Select best available candidate from registry
 function lsp.find_server_candidate(filetype)
     local candidates = lsp.registry[filetype]
     if not candidates then return nil end
@@ -201,9 +195,9 @@ function lsp.start(filetype)
         local known = lsp.registry[filetype]
         if known and #known > 0 then
             purr.set_lsp_status("LSP: " .. known[1].cmd .. " not installed")
-            purr.set_status(string.format("Install '%s' for %s LSP support", known[1].cmd, filetype))
+            purr.set_status(string.format("Install '%s' for full %s LSP support", known[1].cmd, filetype))
         else
-            purr.set_lsp_status("LSP: none")
+            purr.set_lsp_status("LSP: idle")
         end
         return nil
     end
@@ -220,7 +214,8 @@ function lsp.start(filetype)
         raw_buf = "",
         request_id = 1,
         pending_requests = {},
-        is_ready = false
+        is_ready = false,
+        version = 1
     }
 
     local proc_id = purr.spawn_async(candidate.cmd, candidate.args or {}, function(data)
@@ -276,7 +271,10 @@ function lsp.start(filetype)
                     synchronization = { openClose = true, change = 1, save = { includeText = true } },
                     publishDiagnostics = { relatedInformation = true },
                     hover = { contentFormat = {"plaintext", "markdown"} },
-                    definition = { linkSupport = true }
+                    definition = { linkSupport = true },
+                    completion = {
+                        completionItem = { snippetSupport = false }
+                    }
                 }
             }
         }
@@ -307,6 +305,27 @@ function lsp.did_open(filename, filetype)
     })
 end
 
+function lsp.did_change(filename, filetype)
+    local server = lsp.servers[filetype]
+    if not server or not server.is_ready then return end
+
+    server.version = (server.version or 1) + 1
+    local text = purr.get_buffer_text()
+    lsp.send_rpc(server, {
+        jsonrpc = "2.0",
+        method = "textDocument/didChange",
+        params = {
+            textDocument = {
+                uri = path_to_uri(filename),
+                version = server.version
+            },
+            contentChanges = {
+                { text = text }
+            }
+        }
+    })
+end
+
 function lsp.did_save(filename)
     local ft = purr.get_filetype()
     local server = lsp.servers[ft]
@@ -323,7 +342,139 @@ function lsp.did_save(filename)
     })
 end
 
--- Hover documentation (triggered by 'K' or :lsp hover)
+-- Fallback word and keyword completion
+local function get_fallback_completions(prefix)
+    local text = purr.get_buffer_text() or ""
+    local seen = {}
+    local candidates = {}
+    local lower_prefix = prefix:lower()
+
+    local standard_words = {
+        "printf", "sprintf", "fprintf", "malloc", "free", "sizeof", "strlen", "memset", "memcpy",
+        "return", "struct", "typedef", "static", "const", "include", "define",
+        "function", "local", "table", "string", "print", "import", "class", "while", "for",
+        "switch", "case", "break", "continue", "default", "unsigned", "signed"
+    }
+
+    for _, w in ipairs(standard_words) do
+        if w:lower():find("^" .. lower_prefix) and w ~= prefix then
+            seen[w] = true
+            table.insert(candidates, { label = w, insert_text = w, kind = 14 })
+        end
+    end
+
+    for w in text:gmatch("[%a_][%w_]+") do
+        if #w >= 2 and w:lower():find("^" .. lower_prefix) and w ~= prefix and not seen[w] then
+            seen[w] = true
+            table.insert(candidates, { label = w, insert_text = w, kind = 6 })
+            if #candidates >= 25 then break end
+        end
+    end
+
+    return candidates
+end
+
+-- Get current word prefix before cursor
+local function get_current_prefix()
+    local row, col = purr.get_cursor()
+    local text = purr.get_buffer_text() or ""
+    local cur_row = 1
+    local line_text = ""
+    for line in (text .. "\n"):gmatch("(.-)\r?\n") do
+        if cur_row == row then
+            line_text = line
+            break
+        end
+        cur_row = cur_row + 1
+    end
+
+    local before_cursor = line_text:sub(1, math.max(0, col - 1))
+    local prefix = before_cursor:match("([%a_][%w_]*)$") or ""
+    return prefix
+end
+
+-- Tab completion request with automatic LSP + buffer fallback
+function lsp.request_completion()
+    local ft = purr.get_filetype() or "text"
+    local fn = purr.get_filename() or "untitled"
+    local server = lsp.servers[ft]
+    local prefix = get_current_prefix()
+
+    local fallbacks = get_fallback_completions(prefix)
+
+    if not server or not server.is_ready then
+        if #fallbacks > 0 then
+            purr.set_completions(fallbacks)
+        else
+            purr.clear_completions()
+            local known = lsp.registry[ft]
+            if known and #known > 0 then
+                purr.set_status(string.format("Install '%s' for full %s autocomplete", known[1].cmd, ft))
+            end
+        end
+        return
+    end
+
+    -- Sync latest buffer changes to LSP server before completion request
+    lsp.did_change(fn, ft)
+
+    local row, col = purr.get_cursor()
+    local req_id = server.request_id
+    server.request_id = server.request_id + 1
+
+    server.pending_requests[req_id] = function(result, err)
+        if err or not result then
+            if #fallbacks > 0 then purr.set_completions(fallbacks)
+            else purr.clear_completions() end
+            return
+        end
+
+        local raw_items = result.items or result
+        if type(raw_items) ~= "table" or #raw_items == 0 then
+            if #fallbacks > 0 then purr.set_completions(fallbacks)
+            else purr.clear_completions() end
+            return
+        end
+
+        local items = {}
+        for i = 1, math.min(#raw_items, 25) do
+            local item = raw_items[i]
+            if type(item) == "table" and item.label then
+                table.insert(items, {
+                    label = item.label,
+                    insert_text = item.insertText or item.label,
+                    kind = item.kind or 1
+                })
+            elseif type(item) == "string" then
+                table.insert(items, {
+                    label = item,
+                    insert_text = item,
+                    kind = 1
+                })
+            end
+        end
+
+        if #items > 0 then
+            purr.set_completions(items)
+        elseif #fallbacks > 0 then
+            purr.set_completions(fallbacks)
+        else
+            purr.clear_completions()
+        end
+    end
+
+    lsp.send_rpc(server, {
+        jsonrpc = "2.0",
+        id = req_id,
+        method = "textDocument/completion",
+        params = {
+            textDocument = { uri = path_to_uri(fn) },
+            position = { line = row - 1, character = col - 1 }
+        }
+    })
+end
+
+-- Hover documentation
 function lsp.hover()
     local ft = purr.get_filetype()
     local server = lsp.servers[ft]
@@ -376,7 +527,7 @@ function lsp.hover()
     })
 end
 
--- Go to definition (triggered by :lsp def)
+-- Go to definition
 function lsp.definition()
     local ft = purr.get_filetype()
     local server = lsp.servers[ft]
@@ -425,69 +576,6 @@ function lsp.definition()
         jsonrpc = "2.0",
         id = req_id,
         method = "textDocument/definition",
-        params = {
-            textDocument = { uri = path_to_uri(fn) },
-            position = { line = row - 1, character = col - 1 }
-        }
-    })
-end
-
--- Tab completion request
-function lsp.request_completion()
-    local ft = purr.get_filetype()
-    local server = lsp.servers[ft]
-    if not server or not server.is_ready then
-        purr.clear_completions()
-        return
-    end
-
-    local row, col = purr.get_cursor()
-    local fn = purr.get_filename() or "untitled"
-
-    local req_id = server.request_id
-    server.request_id = server.request_id + 1
-
-    server.pending_requests[req_id] = function(result, err)
-        if err or not result then
-            purr.clear_completions()
-            return
-        end
-
-        local raw_items = result.items or result
-        if type(raw_items) ~= "table" then
-            purr.clear_completions()
-            return
-        end
-
-        local items = {}
-        for i = 1, math.min(#raw_items, 25) do
-            local item = raw_items[i]
-            if type(item) == "table" and item.label then
-                table.insert(items, {
-                    label = item.label,
-                    insert_text = item.insertText or item.label,
-                    kind = item.kind or 1
-                })
-            elseif type(item) == "string" then
-                table.insert(items, {
-                    label = item,
-                    insert_text = item,
-                    kind = 1
-                })
-            end
-        end
-
-        if #items > 0 then
-            purr.set_completions(items)
-        else
-            purr.clear_completions()
-        end
-    end
-
-    lsp.send_rpc(server, {
-        jsonrpc = "2.0",
-        id = req_id,
-        method = "textDocument/completion",
         params = {
             textDocument = { uri = path_to_uri(fn) },
             position = { line = row - 1, character = col - 1 }

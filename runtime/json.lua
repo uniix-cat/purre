@@ -2,8 +2,8 @@
 local json = {}
 
 local function escape_str(s)
-    local in_char  = {'\\', '"', '/', '\b', '\f', '\n', '\r', '\t'}
-    local out_char = {'\\\\', '\\"', '\\/', '\\b', '\\f', '\\n', '\\r', '\\t'}
+    local in_char  = {'\\', '"', '\b', '\f', '\n', '\r', '\t'}
+    local out_char = {'\\\\', '\\"', '\\b', '\\f', '\\n', '\\r', '\\t'}
     for i, c in ipairs(in_char) do
         s = s:gsub(c, out_char[i])
     end
@@ -21,6 +21,9 @@ function json.encode(val)
     elseif t == "string" then
         return '"' .. escape_str(val) .. '"'
     elseif t == "table" then
+        if val.__is_array then
+            return "[]"
+        end
         local is_array = true
         local n = 0
         for k, _ in pairs(val) do
@@ -30,7 +33,10 @@ function json.encode(val)
                 break
             end
         end
-        if is_array and n > 0 and val[1] == nil then
+        if n == 0 then
+            return "{}"
+        end
+        if is_array and val[1] == nil then
             is_array = false
         end
 

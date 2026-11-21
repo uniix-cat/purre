@@ -185,12 +185,13 @@ int terminal_read_key_utf8(int fd, char *utf8_out, int *utf8_len) {
         return KEY_ESC;
     }
 
-    /* Backspace and Enter */
+    /* Backspace, Enter, and Tab */
+    if (c == '\t') return KEY_TAB;
     if (c == '\n' || c == '\r') return KEY_ENTER;
     if (c == 8 || c == 127) return KEY_BACKSPACE;
 
     /* Control keys (Ctrl+A..Z) */
-    if ((unsigned char)c < 32 && c != '\t') {
+    if ((unsigned char)c < 32) {
         return (unsigned char)c;
     }
 

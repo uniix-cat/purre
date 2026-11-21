@@ -576,7 +576,7 @@ void editor_process_key_event(int key, const char *utf8, int len) {
             return;
         }
 
-        if (key == '\t') {
+        if (key == '\t' || key == KEY_TAB) {
             if (E.completion_active && E.num_completions > 0) {
                 /* Cycle through completion candidates */
                 E.completion_selected = (E.completion_selected + 1) % E.num_completions;
@@ -635,6 +635,17 @@ void editor_process_key_event(int key, const char *utf8, int len) {
                 }
             }
             return;
+        }
+
+        if (E.completion_active && E.num_completions > 0) {
+            if (key == KEY_ARROW_DOWN || key == CTRL_KEY('n')) {
+                E.completion_selected = (E.completion_selected + 1) % E.num_completions;
+                return;
+            }
+            if (key == KEY_ARROW_UP || key == CTRL_KEY('p')) {
+                E.completion_selected = (E.completion_selected - 1 + E.num_completions) % E.num_completions;
+                return;
+            }
         }
 
         if (key == KEY_ARROW_LEFT || key == KEY_ARROW_RIGHT ||

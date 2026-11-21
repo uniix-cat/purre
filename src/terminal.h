@@ -7,6 +7,7 @@
 enum EditorKey {
     KEY_NONE = 0,
     KEY_CHAR = 1,
+    KEY_TAB = 9,
     KEY_BACKSPACE = 127,
     KEY_ESC = 27,
     KEY_ENTER = '\r',
